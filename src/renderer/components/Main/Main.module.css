@@ -1,0 +1,13 @@
+
+.main-container{
+    background-color: rgb(95, 180, 255);
+    padding: 24px;
+   
+    
+}
+
+.extension-card{
+    background-color: white;
+    border: 1px solid black;
+    padding: 6px;
+}

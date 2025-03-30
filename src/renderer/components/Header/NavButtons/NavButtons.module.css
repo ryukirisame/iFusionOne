@@ -1,0 +1,42 @@
+.nav-btns-container {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.tabs-container {
+  height: 100%;
+  display: flex;
+
+}
+
+.tab {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-container {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn {
+  padding: 0 16px;
+  user-select: none;
+}
+
+.btn:hover {
+  
+  background-color: rgb(166, 166, 166);
+}
+
+
+.home-btn.active{
+  background-color: rgb(194, 194, 194);
+}
+

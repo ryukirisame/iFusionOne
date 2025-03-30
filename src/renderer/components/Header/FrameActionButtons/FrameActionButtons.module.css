@@ -1,0 +1,33 @@
+.frame-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+
+.frame-action-btn {
+  outline: none;
+  border: none;
+  padding: 0;
+  height: 32px;
+  width: 46px;
+
+  background-color: rgb(235, 235, 235);
+}
+
+.frame-action-btn:hover {
+  background-color: rgb(180, 180, 180);
+}
+
+
+
+.frame-action-btn > :first-child {
+    font-size: 16px;
+    
+    color: black;
+
+    
+}
+
