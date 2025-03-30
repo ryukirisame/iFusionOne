@@ -9,7 +9,7 @@
     "skipLibCheck": true,
     // add global types
     // "types": ["../../types",],
-    "typeRoots": ["../../types", "../../node_modules/@types"]
+    "typeRoots": ["../../types/*", "../../node_modules/@types"]
   },
-  "include": ["core/event-bus/events/*.d.ts","../../types/**/*.d.ts", "./**/*" ]
+  "include": ["../../types/**/*.d.ts", "./**/*"]
 }
