@@ -1,0 +1,13 @@
+// Re-exports Errors
+
+export { default as SchemaValidationError } from "./SchemaValidationError.js";
+export { default as DatabaseError } from "./DatabaseError.js";
+export { default as RepositoryError } from "./RepositoryError.js";
+export { default as CriticalDatabaseError } from "./CriticalDatabaseError.js";
+export { default as BaseError } from "./BaseError.js";
+export { default as FileSystemError } from "./FileSystemError.js";
+export { default as CriticalFileSystemError } from "./CriticalFileSystemError.js";
+export { default as ExtensionError } from "./ExtensionError.js";
+export { default as UnexpectedError } from "./UnexpectedError.js";
+export {default as DataParsingError} from "./DataParsingError.js";
+export {default as InvalidArgumentError} from "./InvalidArgumentError.js";

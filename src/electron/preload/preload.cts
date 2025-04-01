@@ -2,57 +2,60 @@ import { contextBridge, ipcRenderer } from "electron";
 
 const extensionAPIs = {
   installExtension() {
-    return ipcRendererInvoke("extension:install");
+   
+    return ipcRenderer.invoke("extension", "extension:install");
   },
 
   uninstallExtension(uniqueId: string) {
-    return ipcRendererInvoke("extension:uninstall", uniqueId);
+   
+    return ipcRenderer.invoke("extension", "extension:uninstall", uniqueId);
   },
 
   listExtensions() {
-    return ipcRendererInvoke("extension:list");
+    return ipcRenderer.invoke("extension","extension:list");
   },
 
   updateExtension(uniqueId: string, sourcePath: string) {
-    return ipcRendererInvoke("extension:update", { uniqueId, sourcePath });
+    return ipcRenderer.invoke("extension","extension:update", { uniqueId, sourcePath });
   },
 
   enableExtension(uniqueId: string) {
-    return ipcRendererInvoke("extension:enable", uniqueId);
+    return ipcRenderer.invoke("extension","extension:enable", uniqueId);
   },
 
   disableExtension(uniqueId: string) {
-    return ipcRendererInvoke("extension:disable", uniqueId);
+    return ipcRenderer.invoke("extension","extension:disable", uniqueId);
   },
 };
 
 const tabAPIs = {
   createNewTab(extensionUniqueId: string) {
-    return ipcRendererInvoke("tab:create", extensionUniqueId);
+   
+    return ipcRenderer.invoke("tab","tab:create", extensionUniqueId);
   },
 
   closeTab(tabId: string) {
-    return ipcRendererInvoke("tab:close", tabId);
+    return ipcRenderer.invoke("tab","tab:close", tabId);
   },
 
   switchToTab(tabId: string) {
-    return ipcRendererInvoke("tab:switch", tabId);
+    return ipcRenderer.invoke("tab","tab:switch", tabId);
   },
 
   reorderTab(fromIndex: number, toIndex: number) {
-    return ipcRendererInvoke("tab:reorder", { fromIndex, toIndex });
+    return ipcRenderer.invoke("tab","tab:reorder", { fromIndex, toIndex });
   },
 
   getAllTabs() {
-    return ipcRendererInvoke("tab:getAll");
+    return ipcRenderer.invoke("tab","tab:getAll");
   },
 
   getActiveTab() {
-    return ipcRendererInvoke("tab:getActive");
+    return ipcRenderer.invoke("tab","tab:getActive");
   },
 
   hideAllTabs() {
-    ipcRendererSend("tab:hideAll");
+    ipcRenderer.send("tab","tab:hideAll");
   },
 };
 
@@ -87,3 +90,5 @@ export function ipcRendererInvoke<key extends keyof EventPayloadMapping>(
 ): Promise<EventPayloadMapping[key]["response"]> {
   return ipcRenderer.invoke(channel, payload ? payload : null);
 }
+
+

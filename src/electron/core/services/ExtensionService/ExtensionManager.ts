@@ -4,11 +4,22 @@ import { app, BrowserWindow, WebContentsView } from "electron";
 import { v5 as uuidv5 } from "uuid";
 import sqlite3 from "sqlite3";
 import { open, Database } from "sqlite";
-
 import { z } from "zod";
-
 import { ipcMainHandle } from "../../../utils.js";
 import DialogService from "../../../DialogService/DialogService.js";
+import { CommandRegistry } from "../../registry/CommandRegistry/CommandRegistry.js";
+import {
+  SchemaValidationError,
+  FileSystemError,
+  DatabaseError,
+  ExtensionError,
+  CriticalDatabaseError,
+  CriticalFileSystemError,
+  RepositoryError,
+  UnexpectedError,
+  DataParsingError,
+  InvalidArgumentError,
+} from "../../errors/index.js";
 
 // Define a fixed namespace UUID for deterministic ID generation
 const NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
@@ -33,12 +44,15 @@ const ManifestSchema = z.object({
 
 class ExtensionManager {
   private static instance: ExtensionManager;
-  private extensionsPath: string; // Path where extensions are stored
+  private extensionsPath: string; // Path where extensions are stored.
 
   private db: Database | null = null;
   private dbInitPromise: Promise<void> | null = null; // For promise-based locking
 
-  // Private constructor to prevent direct instantiation
+  /**
+   * Private constructor to prevent direct instantiation.
+   * Initializes the extensions storage path.
+   */
   private constructor() {
     // Defines the extensions storage path
     this.extensionsPath = path.join(
@@ -49,8 +63,8 @@ class ExtensionManager {
   }
 
   /**
-   * Returns the single instance of ExtensionManager
-   * @returns The singleton instance.
+   * Returns the single instance of ExtensionManager.
+   * @returns {ExtensionManager} The singleton instance.
    */
   static getInstance(): ExtensionManager {
     if (!this.instance) {
@@ -60,23 +74,51 @@ class ExtensionManager {
     return ExtensionManager.instance;
   }
 
+  /**
+   * Initializes the extension manager by ensuring the repository database is ready.
+   * @returns {Promise<void>} Resolves when the repository is ready.
+   * @throws {RepositoryError} If the initialization fails.
+   */
   async initialize() {
-    await this.ensureRepositoryReady();
-  }
-
-  async ensureDirectoryExists(path: string) {
     try {
-      // Check if the directory exists
-      await fs.access(path);
+      await this.ensureRepositoryReady();
     } catch (error) {
-      // Directory does not exist, so create it
-      await fs.mkdir(path, { recursive: true });
+      throw new RepositoryError(`Repository not ready`, error as Error);
     }
   }
 
   /**
-   * Ensures the database is ready
+   * Ensures that a directory exists. If it doesn't, creates it recursively.
+   * @param {string} path - The path of the directory to check or create.
+   * @returns {Promise<void>} A promise that resolves when the directory exists or is created.
+   * @throws {FileSystemError} If the directory creation fails.
+   *
    */
+  async ensureDirectoryExists(path: string) {
+    try {
+      // Check if the directory exists
+      await fs.access(path);
+    } catch (accessError) {
+      try {
+        // Directory does not exist, so create it
+        await fs.mkdir(path, { recursive: true });
+      } catch (mkdirError) {
+        throw new FileSystemError(
+          `Failed to create directory at path: ${path}`,
+          mkdirError as Error
+        );
+      }
+    }
+  }
+
+  /**
+ * Ensures the repository database is ready for use.
+ * Initializes the database if it doesn't exist.
+ * @returns {Promise<void>} A promise that resolves when the database is ready.
+ * @throws {FileSystemError} If the Extensions directory does not exist.
+ * @throws {DatabaseError} If the database initialization fails.
+ 
+ */
   private async ensureRepositoryReady() {
     if (this.db) return;
 
@@ -88,14 +130,18 @@ class ExtensionManager {
 
     this.dbInitPromise = (async () => {
       try {
+        // Ensure the Extensions directory exists
         await this.ensureDirectoryExists(this.extensionsPath);
+
         const dbPath = path.join(this.extensionsPath, "extensions.db");
 
+        // Open the database connection
         this.db = await open({
           filename: dbPath,
           driver: sqlite3.Database,
         });
 
+        // Initialize the database schema
         await this.db.exec(`
           PRAGMA journal_mode=WAL;
           CREATE TABLE IF NOT EXISTS extensions (
@@ -112,9 +158,13 @@ class ExtensionManager {
             description TEXT NOT NULL
           )
           `);
-      } catch (err) {
-        console.error("Failed to initialize database:", err);
-        throw new Error("Database initialization failed");
+      } catch (error) {
+        if (error instanceof FileSystemError) {
+          // Re-throw FileSystemError if it occurs during directory creation
+          throw new FileSystemError("Extensions directory does not exist", error as Error);
+        }
+
+        throw new DatabaseError(`Database initialization failed`, error as Error);
       } finally {
         this.dbInitPromise = null; // Reset the promise after completion
       }
@@ -123,14 +173,19 @@ class ExtensionManager {
     await this.dbInitPromise;
   }
 
-  /**Closes extension repository database */
+  /**
+ * Closes the database connection.
+ * @returns {Promise<void>} A promise that resolves when the database connection is closed.
+ * @throws {DatabaseError} If the database could not be closed.
+
+ */
   async close() {
     if (this.db) {
       try {
         await this.db.close();
         console.log("Database connection closed.");
       } catch (error) {
-        console.error("Error closing database:", error);
+        throw new DatabaseError("Failed to close the database connection.", error as Error);
       } finally {
         this.db = null;
       }
@@ -138,12 +193,14 @@ class ExtensionManager {
   }
 
   /**
-   * Validate the extension manifest before installation.
-   * If the validation succeeds, a `uniqueId` field is inserted in the manifest.
-   * @param extPath Path of the manifest
-   * @returns Manifest
+   * Validates the extension manifest before installation.
+   * If validation succeeds, a `uniqueId` field is added to the manifest.
+   * @param {string} extPath - The path to the extension directory.
+   * @returns {Promise<ExtensionManifest>} The validated manifest.
+   * @throws {SchemaValidationError} If the manifest schema validation fails.
+   * @throws {FileSystemError} If the manifest file cannot be accessed or read.
    */
-  async validateManifest(extPath: string) {
+  async validateManifest(extPath: string): Promise<ExtensionManifest> {
     const manifestPath = path.join(extPath, "manifest.json");
     try {
       // Ensure manifest exists
@@ -153,82 +210,119 @@ class ExtensionManager {
       const rawData = await fs.readFile(manifestPath, "utf-8");
       const manifest = JSON.parse(rawData) as ExtensionManifest;
 
+      // Validate the manifest using zod
       const validated = ManifestSchema.safeParse(manifest);
       if (!validated.success) {
-        let res: Result<z.ZodFormattedError<ExtensionManifest, string>> = {
-          code: ManifestValidationCode.MANIFEST_INVALID,
-          message: "Invalid manifest format.",
-          data: validated.error.format(), // Returns detailed validation errors
-        };
+        // Extract defailed validation issues
+        const errorMessages = validated.error.issues.map(
+          (issue) => `Field "${issue.path.join(".")}" - ${issue.message}`
+        );
 
-        return res;
+        // Throw a SchemaValidationError with detailed issues
+        throw new SchemaValidationError("Invalid manifest format", errorMessages);
       }
 
+      // Add a uniqueId to the manifest
       manifest.uniqueId = uuidv5(`${manifest.developer}:${manifest.name}`, NAMESPACE);
 
-      let res: Result<ExtensionManifest> = {
-        code: ManifestValidationCode.MANIFEST_VALIDATED,
-        message: `Extension:${manifest.name} manifest is valid.`,
-        data: manifest,
-      };
-      return res;
+      return manifest;
     } catch (error) {
-      console.error("Manifest validation failed:", error);
+      if (error instanceof SchemaValidationError) {
+        throw error; // Re-throw SchemaValidationError
+      }
 
-      let res: Result = {
-        code: ManifestValidationCode.ERROR_VALIDATION_FAILED,
-        message: `Validation failed: ${error}`,
-      };
-
-      return res;
+      throw new FileSystemError(
+        `An error occurred while validating the manifest at path: ${manifestPath}. Please ensure the file exists and is accessible.`,
+        error as Error
+      );
     }
   }
 
-  async installExtension(sourcePath: string) {
-    // Make sure the repository database is ready
-    await this.ensureRepositoryReady();
+  /**
+   * Installs a new extension.
+   * @param {string} sourcePath - The path to the extension source directory.
+   * @returns {Promise<string>} The unique ID of the installed extension.
+   * @throws {FileSystemError} If the extension directory cannot be created, accessed, or copied.
+   * @throws {ExtensionError} If the extension is already installed.
+   * @throws {DatabaseError} If the repository database cannot be initialized or if the extension manifest cannot be inserted into the database.
+   * @throws {SchemaValidationError} If the manifest schema validation fails.
+   * @throws {CriticalFileSystemError} If the rollback fails after a failed copy operation.
+   * @throws {CriticalDatabaseError} If the rollback fails after a failed database transaction.
+   *
+   * @todo Implement force-install.
+   */
+  async installExtension(sourcePath: string): Promise<string> {
+    // Ensure the repository database is ready
+    try {
+      await this.ensureRepositoryReady();
+    } catch (error) {
+      if (error instanceof FileSystemError || error instanceof DatabaseError) {
+        throw new RepositoryError("Repository not ready", error);
+      }
 
-    // Validate the extension manifest
-    const validationResponse = await this.validateManifest(sourcePath);
-
-    if (validationResponse.code !== ManifestValidationCode.MANIFEST_VALIDATED) {
-      return validationResponse;
+      throw new UnexpectedError(
+        "Unexpected error during repository initialization",
+        error as Error
+      );
     }
 
-    const manifest = validationResponse.data as ExtensionManifest;
+    // Validate the extension manifest and get the manifest
+    let manifest: ExtensionManifest;
+    try {
+      manifest = await this.validateManifest(sourcePath);
+    } catch (error) {
+      throw error;
+    }
 
     const destinationPath = path.join(this.extensionsPath, manifest.uniqueId!);
 
     // Check if the extension already exists
     try {
       await fs.access(destinationPath);
-      let res: Result = {
-        code: ExtensionOperationCode.ERROR_EXTENSION_ALREADY_INSTALLED,
-        message: "Extension is already installed.",
-      };
 
-      return res;
+      // If no error, the directory exists, so throw an extension-specific error
+      throw new ExtensionError("Extension is already installed.");
     } catch (error: any) {
-      if (error.code !== "ENOENT") {
-        console.error("Could not access directory:", error);
+      if (error instanceof ExtensionError) {
+        throw error;
+      }
+
+      if (error && typeof error.code === "string" && error.code !== "ENOENT") {
+        throw new FileSystemError(`Could not access directory at path: ${destinationPath}`, error);
       }
     }
 
     // Create the extension folder
-    await fs.mkdir(destinationPath, { recursive: true });
-
     try {
-      // Copy all the data from the source directory
-      await fs.cp(sourcePath, destinationPath, { recursive: true });
+      await fs.mkdir(destinationPath, { recursive: true });
     } catch (error) {
-      await fs.rm(destinationPath, { recursive: true, force: true }); // Rollback
-      return {
-        code: ExtensionOperationCode.EXTENSION_COPY_FAILED,
-        message: `Failed to copy extensions: ${error}`,
-      };
+      throw new FileSystemError(
+        `Failed to create directory for extension at path: ${destinationPath}`,
+        error as Error
+      );
     }
 
-    // Add extension manifest in repository
+    // Copy all the data from the source directory
+    try {
+      await fs.cp(sourcePath, destinationPath, { recursive: true });
+    } catch (error) {
+      try {
+        await fs.rm(destinationPath, { recursive: true, force: true }); // Rollback
+      } catch (rollbackError) {
+        // Rollback failed, throw a CriticalFileSystemError
+        throw new CriticalFileSystemError(
+          `Rollback failed after a failed copy operation during installation of the extension`,
+          rollbackError as Error
+        );
+      }
+
+      throw new FileSystemError(
+        `Failed to copy extension from ${sourcePath} to ${destinationPath}`,
+        error as Error
+      );
+    }
+
+    // Add extension manifest to the repository
     // Use transaction for atomicity
     await this.db!.run("BEGIN TRANSACTION");
     try {
@@ -251,79 +345,141 @@ class ExtensionManager {
       await this.db!.run("COMMIT");
     } catch (error) {
       try {
-        await this.db?.run("ROLLBACK");
+        await this.db!.run("ROLLBACK");
       } catch (rollbackError) {
-        console.error("Rollback failed:", rollbackError);
+        throw new CriticalDatabaseError(
+          "Rollback failed after a failed extension manifest insertion. Database might be in an inconsistent state.",
+          rollbackError as Error
+        );
       }
 
-      console.error("Database transaction failed:", error);
-      let res: Result = {
-        code: DatabaseCode.DATABASE_ERROR,
-        message: "Failed to install extension: " + error,
-      };
-
-      return res;
+      throw new DatabaseError("Failed to insert extension manifest into database", error as Error);
     }
 
-    let res: Result = {
-      code: ExtensionOperationCode.EXTENSION_INSTALL_SUCCESSFUL,
-      message: `Installed extension: ${manifest.name}`,
-    };
+    // console.log(`Extension installed successfuly. Assigned uniqueid: ${manifest.uniqueId}`);
 
-    console.log("Extension installed successfuly");
-    return res;
+    return manifest.uniqueId as string;
   }
 
-  // Uninstalls an extension
-  async uninstallExtension(uniqueId: string): Promise<Result> {
+  /**
+   * Uninstalls an extension by its unique ID.
+   * @param {string} uniqueId - The unique ID of the extension to uninstall.
+   * @returns {Promise<string>} Resolves with the unique ID of the uninstalled extension.
+   * @throws {RepositoryError} If the repository is not ready.
+   * @throws {FileSystemError} If the extension directory cannot be removed.
+   * @throws {DatabaseError} If the extension cannot be removed from the repository database.
+   * @throws {CriticalDatabaseError} If the rollback fails after a failed database transaction.
+   */
+  async uninstallExtension(uniqueId: string): Promise<string> {
     // Making sure the repository database is ready
-    await this.ensureRepositoryReady();
+    try {
+      await this.ensureRepositoryReady();
+    } catch (error) {
+      if (error instanceof FileSystemError || error instanceof DatabaseError) {
+        throw new RepositoryError("Repository not ready", error);
+      }
+
+      throw new UnexpectedError(
+        "Unexpected error during repository initialization",
+        error as Error
+      );
+    }
 
     const extPath = path.join(this.extensionsPath, uniqueId);
 
-    // const exists = await this.db!.get("SELECT * FROM extensions WHERE uniqueId = ?", uniqueId);
-
-    // if (!exists) {
-    //   return {
-    //     code: UninstallExtensionCode.EXTENSION_NOT_FOUND,
-    //     message: "Extension does not exist",
-    //   };
-    // }
-
-    await this.db!.run("BEGIN TRANSACTION");
+    // Remove the directory and its contents
     try {
       await fs.rm(extPath, { recursive: true, force: true });
+    } catch (error) {
+      throw new FileSystemError(
+        `Failed to remove extension directory at path: ${extPath}`,
+        error as Error
+      );
+    }
+
+    // Remove the extension entry from repository database
+    await this.db!.run("BEGIN TRANSACTION");
+    try {
       const stmt = await this.db!.prepare("DELETE FROM extensions WHERE uniqueId = ?");
       await stmt.run(uniqueId);
       await stmt.finalize();
       await this.db!.run("COMMIT");
-
-      return {
-        code: ExtensionOperationCode.EXTENSION_UNINSTALL_SUCCESSFUL,
-        message: `Uninstalled extension: ${uniqueId}`,
-      };
     } catch (error) {
       try {
         await this.db!.run("ROLLBACK");
       } catch (rollbackError) {
-        console.error("Rollback failed:", rollbackError);
+        throw new CriticalDatabaseError(
+          `Rollback failed after a failed uninstall operation for extension ${uniqueId}. Database might be in an inconsistent state.`,
+          rollbackError as Error
+        );
       }
 
-      return {
-        code: DatabaseCode.DATABASE_ERROR,
-        message: "Failed to uninstall extension",
-      };
+      throw new DatabaseError(
+        `Failed to uninstall extension ${uniqueId} from the database.`,
+        error as Error
+      );
     }
+
+    console.log(`Extension with uniqueId: ${uniqueId} uninstall successful.`);
+
+    return uniqueId;
   }
 
-  async listExtensions(): Promise<Result<ExtensionManifest[]>> {
-    await this.ensureRepositoryReady();
+  /**
+   * Lists all installed extensions.
+   * @returns {Promise<ExtensionManifest[]>} An array of extension manifests.
+   * @throws {RepositoryError} If the repository is not ready.
+   * @throws {DatabaseError} If the extensions could not be retrieved from the database.
+   * @throws {DataParsingError} If the extension data retrieved from the database could not be parsed or is missing required field.
+   *
+   *
+   * @todo perform zod validation on the extension data retrieved from the database
+   */
+  async listExtensions(): Promise<ExtensionManifest[]> {
+    // Making sure the repository database is ready
+    try {
+      await this.ensureRepositoryReady();
+    } catch (error) {
+      if (error instanceof FileSystemError || error instanceof DatabaseError) {
+        throw new RepositoryError("Repository not ready", error);
+      }
 
+      throw new UnexpectedError(
+        "Unexpected error during repository initialization",
+        error as Error
+      );
+    }
+
+    // Retrieve extensions from the database
     try {
       const rows = await this.db!.all("SELECT * FROM extensions");
 
+      // Map database rows to ExtensionManifest objects
       const extensions: ExtensionManifest[] = rows.map((ext) => {
-        let permissions: string[] = JSON.parse(ext.permissions); // Converting JSON string back to an array
+        // Validate the required row data
+        if (
+          !ext.name ||
+          !ext.version ||
+          !ext.entry ||
+          !ext.developer ||
+          !ext.description ||
+          !ext.permissions
+        ) {
+          throw new DataParsingError(
+            `Invalid data for extension with uniqueId: ${ext.uniqueId}. Missing required fields.`
+          );
+        }
+
+        // Parse the permissions field
+        let permissions: string[];
+        try {
+          permissions = JSON.parse(ext.permissions); // Convert JSON string back to an array
+        } catch (error) {
+          throw new DataParsingError(
+            `Failed to parse permissions for extension with uniqueId: ${ext.uniqueId}.`,
+            error as Error
+          );
+        }
 
         return {
           ...ext,
@@ -331,99 +487,198 @@ class ExtensionManager {
         };
       });
 
-      return {
-        code: ExtensionOperationCode.EXTENSIONS_RETRIEVED,
-        message: "Extensions fetched successfully",
-        data: extensions,
-      };
+      // Return extensions
+      return extensions;
     } catch (error) {
-      return {
-        code: DatabaseCode.DATABASE_ERROR,
-        message: "Failed to retrieve extensions",
-      };
+      if (error instanceof DataParsingError) {
+        throw error;
+      }
+
+      throw new DatabaseError("Failed to retrieve extensions from the database.", error as Error);
     }
   }
 
-  async updateExtension(uniqueId: string, sourcePath: string) {
-    await this.uninstallExtension(uniqueId);
-    return this.installExtension(sourcePath);
+  /**
+   * Updates an existing extension by uninstalling and reinstalling it.
+   * @param {string} uniqueId - The unique ID of the extension to update.
+   * @param {string} sourcePath - The path to the new extension source directory.
+   * @returns {Promise<string>} The unique ID of the updated extension.
+   *
+   * @throws {ExtensionError} If the update fails during the uninstall or reinstall phase.
+   */
+  async updateExtension(uniqueId: string, sourcePath: string): Promise<string> {
+    // Phase 1: Uninstall
+    try {
+      await this.uninstallExtension(uniqueId);
+    } catch (error) {
+      throw new ExtensionError(
+        `Update failed during uninstall phase for extension ${uniqueId}.`,
+        error as Error
+      );
+    }
+
+    // Phase 2: Re-Install
+    try {
+      return this.installExtension(sourcePath);
+    } catch (error) {
+      throw new ExtensionError(
+        `Update failed during reinstall phase for extension ${uniqueId}.`,
+        error as Error
+      );
+    }
   }
 
-  async enableExtension(uniqueId: string): Promise<Result> {
-    await this.ensureRepositoryReady();
+  /**
+   * Enables extension.
+   * @param {string} uniqueId - The unique ID of the extension to enable.
+   * @returns {Promise<void>} Resolves when the extension is successfully enabled.
+   * @throws {RepositoryError} If the repository is not ready.
+   * @throws {DatabaseError} If the extension cannot be enabled in the repository database.
+   * @throws {ExtensionError} If the extension does not exist.
+   
+   */
+  async enableExtension(uniqueId: string) {
+    // Ensure the repository database is ready
+    try {
+      await this.ensureRepositoryReady();
+    } catch (error) {
+      if (error instanceof FileSystemError || error instanceof DatabaseError) {
+        throw new RepositoryError("Repository not ready", error);
+      }
+      throw new UnexpectedError(
+        "Unexpected error during repository initialization",
+        error as Error
+      );
+    }
 
+    // Begin database transaction
     await this.db!.run("BEGIN TRANSACTION");
     try {
       const stmt = await this.db!.prepare(`UPDATE extensions SET isEnabled = 1 WHERE uniqueId = ?`);
 
       const result = await stmt.run(uniqueId);
       await stmt.finalize();
+
+      // Check if the extension exists
       if (result.changes === 0) {
-        return {
-          code: ExtensionOperationCode.ERROR_EXTENSION_NOT_FOUND,
-          message: `Extension ${uniqueId} not found.`,
-        };
+        throw new ExtensionError(`Extension with unique ID ${uniqueId} not found.`);
       }
 
+      // Commit the transaction
       await this.db!.run("COMMIT");
-      return {
-        code: ExtensionOperationCode.EXTENSION_ENABLE_SUCCESSFUL,
-        message: `Enabled extension: ${uniqueId}`,
-      };
     } catch (error) {
       try {
         await this.db!.run("ROLLBACK");
       } catch (rollbackError) {
-        console.error("Rollback failed:", rollbackError);
+        throw new CriticalDatabaseError(
+          `Rollback failed during enable operation for extension ${uniqueId}. Database might be in an inconsistent state.`,
+          rollbackError as Error
+        );
       }
-      return {
-        code: DatabaseCode.DATABASE_ERROR,
-        message: `Failed to enable extension: ${uniqueId}: ${error}`,
-      };
+
+      if (error instanceof ExtensionError) {
+        throw error; // Re-throw extension-specific errors
+      }
+
+      throw new DatabaseError(
+        `Failed to enable extension with unique ID ${uniqueId}.`,
+        error as Error
+      );
     }
   }
 
-  async disableExtension(uniqueId: string): Promise<Result> {
-    await this.ensureRepositoryReady();
+  /**
+   * Disables extension.
+   * @param {string} uniqueId - The unique ID of the extension to disable.
+   * @returns {Promise<void>} Resolves when the extension is successfully disabled.
+   * @throws {DatabaseError} If the extension cannot be disabled in the  repository database.
+   * @throws {ExtensionError} If the extension does not exist.
+   * @throws {RepositoryError} If the repository is not ready.
+   */
+  async disableExtension(uniqueId: string) {
+    // Ensure the repository database is ready
+    try {
+      await this.ensureRepositoryReady();
+    } catch (error) {
+      if (error instanceof FileSystemError || error instanceof DatabaseError) {
+        throw new RepositoryError("Repository not ready", error);
+      }
+      throw new UnexpectedError(
+        "Unexpected error during repository initialization",
+        error as Error
+      );
+    }
 
+    // Begin database transaction
     await this.db!.run("BEGIN TRANSACTION");
-
     try {
       const stmt = await this.db!.prepare(`UPDATE extensions SET isEnabled = 0 WHERE uniqueId = ?`);
 
-      await stmt.run(uniqueId);
+      const result = await stmt.run(uniqueId);
       await stmt.finalize();
+
+      // Check if the extension exists
+      if (result.changes === 0) {
+        throw new ExtensionError(`Extension with unique ID ${uniqueId} not found.`);
+      }
+
+      // Commit the transaction
       await this.db!.run("COMMIT");
-      return { code: "SUCCESS", message: `Disabled extension: ${uniqueId}` };
     } catch (error) {
+      // Attempt to rollback the transaction
       try {
         await this.db!.run("ROLLBACK");
       } catch (rollbackError) {
-        console.error(rollbackError);
+        throw new CriticalDatabaseError(
+          `Rollback failed during disable operation for extension ${uniqueId}. Database might be in an inconsistent state.`,
+          rollbackError as Error
+        );
       }
 
-      return {
-        code: DatabaseCode.DATABASE_ERROR,
-        message: `Failed to disable extension: ${uniqueId}: ${error}`,
-      };
+      if (error instanceof ExtensionError) {
+        throw error; // Re-throw extension-specific errors
+      }
+
+      // Throw a concise error message with context
+      throw new DatabaseError(
+        `Failed to disable extension with unique ID ${uniqueId}.`,
+        error as Error
+      );
     }
   }
 
-  async loadExtension(
-    uniqueId: string,
-    view: WebContentsView
-  ): Promise<Result | Result<ExtensionManifest>> {
+  /**
+   * Loads an extension into a given WebContentsView.
+   * @param {string} uniqueId - The unique ID of the extension to load.
+   * @param {WebContentsView} view - The WebContentsView to load the extension into.
+   * @returns {Promise<ExtensionManifest>} The loaded extension manifest.
+   * @throws {RepositoryError} If the repository is not ready.
+   * @throws {ExtensionError} If the extension does not exist or is disabled.
+   * @throws {FileSystemError} If the entry point file cannot be accessed.
+   * @throws {DatabaseError} If the extension details cannot be retrieved from the database.
+   */
+  async loadExtension(uniqueId: string, view: WebContentsView): Promise<ExtensionManifest> {
+    // Validate the WebContentsView
     if (!view || !view.webContents) {
-      return {
-        code: ExtensionOperationCode.ERROR_INVALID_VIEW,
-        message: "Invalid webContentsView provided.",
-      };
+      throw new InvalidArgumentError("Invalid WebContentsView provided.")
     }
 
-    await this.ensureRepositoryReady();
-
+    // Ensure the repository database is ready
     try {
-      // Fetch extension details from DB
+      await this.ensureRepositoryReady();
+    } catch (error) {
+      if (error instanceof FileSystemError || error instanceof DatabaseError) {
+        throw new RepositoryError("Repository not ready", error);
+      }
+      throw new UnexpectedError(
+        "Unexpected error during repository initialization",
+        error as Error
+      );
+    }
+
+    // Fetch extension details from the repository database
+    let extension: ExtensionManifest;
+    try {
       const stmt = await this.db!.prepare("SELECT * FROM extensions WHERE uniqueId = ?");
 
       const result = await stmt.get(uniqueId);
@@ -432,55 +687,53 @@ class ExtensionManager {
 
       // If extension doesn't exist
       if (!result) {
-        return {
-          code: ExtensionOperationCode.ERROR_EXTENSION_NOT_FOUND,
-          message: `Extension ${uniqueId} not found`,
-        };
+        throw new ExtensionError(`Extension with unique ID ${uniqueId} not found.`);
       }
 
-      const extension: ExtensionManifest = {
+      extension = {
         ...result,
         permissions: JSON.parse(result.permissions),
       };
 
-      // Load extension only when its enabled
+      // Check if the extension is enabled
       if (extension.isEnabled === 0) {
-        return {
-          code: ExtensionOperationCode.ERROR_EXTENSION_DISABLED,
-          message: `Extension ${extension.name} is disabled.`,
-        };
+        throw new ExtensionError(`Extension ${extension.name} is disabled.`);
       }
-
-      // Resolve and verify extension path
-      const extPath = path.resolve(this.extensionsPath, uniqueId);
-      const entryFilePath = path.join(extPath, extension.entry);
-
-      // Ensuring entry file exists
-      try {
-        await fs.access(entryFilePath);
-      } catch (error) {
-        return {
-          code: ExtensionOperationCode.ERROR_ENTRY_FILE_NOT_FOUND,
-          message: `Entry point file not found for ${extension.uniqueId}.`,
-        };
-      }
-
-      view.webContents.loadFile(entryFilePath);
-      //  TabManager.getInstance()
-
-      return {
-        code: ExtensionOperationCode.EXTENSION_LOAD_SUCCESSFUL,
-        message: `Loaded extension: ${extension.name}`,
-        data: extension,
-      };
     } catch (error) {
-      console.error(`Error loading extension ${uniqueId}:`, error);
+      if (error instanceof ExtensionError) {
+        throw error; // Re-throw extension-specific errors
+      }
 
-      return {
-        code: ExtensionOperationCode.ERROR_EXTENSION_LOAD_FAILED,
-        message: `Failed to load extension: ${error}`,
-      };
+      throw new DatabaseError(
+        `Failed to retrieve extension with unique ID ${uniqueId} from the database.`,
+        error as Error
+      );
     }
+
+    // Resolve and verify extension path
+    const extPath = path.resolve(this.extensionsPath, uniqueId);
+    const entryFilePath = path.join(extPath, extension.entry);
+
+    // Ensuring entry file exists
+    try {
+      await fs.access(entryFilePath);
+    } catch (error) {
+      throw new FileSystemError(
+        `Entry point file not found for extension ${uniqueId} at path: ${entryFilePath}`,
+        error as Error
+      );
+    }
+
+    try {
+      await view.webContents.loadFile(entryFilePath);
+    } catch (error) {
+      throw new ExtensionError(
+        `Failed to load extension ${extension.name} into the WebContentsView.`,
+        error as Error
+      );
+    }
+
+    return extension;
   }
 }
 
@@ -488,40 +741,36 @@ export function initializeExtensionManager(window: BrowserWindow): ExtensionMana
   const extensionManager: ExtensionManager = ExtensionManager.getInstance();
   extensionManager.initialize(); // Don't wait for initialization for now
 
-  // Registering IPC for Extension
-  ipcMainHandle("extension:install", async () => {
+  CommandRegistry.register("extension:install", async () => {
     const path = await DialogService.selectFolder(window);
-
     if (!path) {
       console.log("Folder selection cancelled");
       return;
     }
-
     try {
-      const extensionInfo = await extensionManager.installExtension(path);
-      return extensionInfo;
+      return await extensionManager.installExtension(path);
     } catch (error) {
       console.error(error);
     }
   });
 
-  ipcMainHandle("extension:uninstall", async (payload) => {
-    return await extensionManager.uninstallExtension(payload);
+  CommandRegistry.register("extension:uninstall", async (uniqueId: string) => {
+    return await extensionManager.uninstallExtension(uniqueId);
   });
 
-  ipcMainHandle("extension:list", async (payload) => {
+  CommandRegistry.register("extension:list", async () => {
     return await extensionManager.listExtensions();
   });
 
-  ipcMainHandle("extension:update", async (payload) => {
+  CommandRegistry.register("extension:update", async (payload) => {
     return extensionManager.updateExtension(payload.uniqueId, payload.sourcePath);
   });
 
-  ipcMainHandle("extension:enable", async (payload) => {
+  CommandRegistry.register("extension:enable", async (payload) => {
     return await extensionManager.enableExtension(payload);
   });
 
-  ipcMainHandle("extension:disable", async (payload) => {
+  CommandRegistry.register("extension:disable", async (payload) => {
     return await extensionManager.disableExtension(payload);
   });
 

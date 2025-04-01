@@ -2,19 +2,21 @@ import { ServiceRegistry } from "../../registry/ServiceRegistry/ServiceRegistry.
 import Service from "../Service.js";
 import ExtensionManager from "./ExtensionManager.js";
 
-export default class ExtensionService implements Service {
+export default class ExtensionService extends Service {
   private ExtensionServiceImpl: ExtensionManager;
 
   constructor() {
+    super();
     this.ExtensionServiceImpl = ExtensionManager.getInstance();
   }
 
-  start() {
-    console.log("Extension Service started");
-  }
-  stop() {
-    console.log("Extension Service stopped");
-  }
+  // We could override the start() and stop() methods.
+  // start() {
+  //   console.log("Extension Service started");
+  // }
+  // stop() {
+  //   console.log("Extension Service stopped");
+  // }
 
   installExtension() {
     console.log("Installing Extension");

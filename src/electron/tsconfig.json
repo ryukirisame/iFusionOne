@@ -4,6 +4,7 @@
     "strict": true,
 
     "target": "ESNext",
+    "lib": ["ESNext", "DOM"], // Include ES2022 features
     "module": "NodeNext",
     "outDir": "../../dist-electron",
     "skipLibCheck": true,

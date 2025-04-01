@@ -76,7 +76,7 @@ declare global {
 
     "extension:list": {
       request: null;
-      response: Result<ExtensionManifest[]>;
+      response: ExtensionManifest[];
     };
 
     "extension:update": {
@@ -111,7 +111,7 @@ declare global {
 
       uninstallExtension: (uniqueId: string) => Promise<Result>,
 
-      listExtensions: ()=> Promise<Result<ExtensionManifest[]>>,
+      listExtensions: ()=> Promise<ExtensionManifest[]>,
 
       updateExtension: (uniqueId: string, sourcePath: string)=> Promise<Result<null> | Result<ExtensionManifest> | Result<z.ZodFormattedError<ExtensionManifest, string>>>,
 

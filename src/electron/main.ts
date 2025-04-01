@@ -10,6 +10,7 @@ import { pathToFileURL } from "url";
 import ExtensionManager, {
   initializeExtensionManager,
 } from "./core/services/ExtensionService/ExtensionManager.js";
+import setupIPCChannels from "./core/ipc/ipc.js";
 
 Menu.setApplicationMenu(null);
 
@@ -37,6 +38,8 @@ app.whenReady().then(() => {
   // Initalizing managers
   initializeTabManager(mainWindow);
   extensionManager = initializeExtensionManager(mainWindow);
+
+  setupIPCChannels();
 });
 
 async function selectFolderAndReadFile() {

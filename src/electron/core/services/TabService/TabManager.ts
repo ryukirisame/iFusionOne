@@ -1,9 +1,10 @@
 import { getPreloadFilePath } from "../../../pathResolver.js";
 
-import { BrowserWindow, WebContentsView } from "electron";
+import { BrowserWindow, ipcMain, WebContentsView } from "electron";
 import { ipcMainHandle, ipcMainOn } from "../../../utils.js";
 import path from "path";
 import ExtensionManager from "../ExtensionService/ExtensionManager.js";
+import { CommandRegistry } from "../../registry/CommandRegistry/CommandRegistry.js";
 
 const headerHeight = 32;
 
@@ -32,7 +33,7 @@ export default class TabManager {
     return TabManager.instance;
   }
 
-  async createNewTab(extensionUniqueId: string): Promise<Result | Result<TabUIInfo>> {
+  async createNewTab(extensionUniqueId: string): Promise<TabUIInfo> {
     // Generate Tab ID
     const id = this.generateTabId();
 
@@ -40,17 +41,21 @@ export default class TabManager {
     const view = new WebContentsView({
       webPreferences: {
         preload: getPreloadFilePath(),
+        sandbox: true,
       },
     });
 
+    
+    
+
     // Loading the extension in the view
     // view.webContents.loadFile(path.join(extension.path));
-    const res: Result | Result<ExtensionManifest> =
-      await ExtensionManager.getInstance().loadExtension(extensionUniqueId, view);
-
-    if (res.code !== ExtensionOperationCode.EXTENSION_LOAD_SUCCESSFUL) {
-      // tell the user that extension could not be loaded
-      return res as Result;
+    let manifest: ExtensionManifest;
+    try {
+      manifest = await ExtensionManager.getInstance().loadExtension(extensionUniqueId, view);
+    } catch (error) {
+      console.error(`Failed to load extension with uniqueId ${extensionUniqueId}:`, error);
+      throw new Error(`Failed to create tab: ${error}`);
     }
 
     this.resizeView(view);
@@ -60,8 +65,8 @@ export default class TabManager {
     const newTab: Tab = {
       id,
       view,
-      title: res.data?.name ?? "Title not available",
-      extensionUniqueId: res.data?.uniqueId ?? "Extension uniqueId not available",
+      title: manifest.name ?? "Title not available",
+      extensionUniqueId: manifest.uniqueId ?? "Extension uniqueId not available",
     };
 
     this.tabs.push(newTab);
@@ -69,16 +74,12 @@ export default class TabManager {
     this.switchToTab(id);
 
     view.webContents.on("destroyed", () => {
-      console.log("View destroyed:", id, " Extension:", res.data?.name ?? "Name not available");
+      console.log("View destroyed:", id, " Extension:", manifest.name ?? "Name not available");
     });
 
     return {
-      code: TabManagerResultCode.TAB_CREATE_SUCCESSFUL,
-      message: `Tab successfully created with extension uniqueId:${res.data?.uniqueId}`,
-      data: {
-        id: newTab.id,
-        title: newTab.title,
-      } as TabUIInfo,
+      id: newTab.id,
+      title: newTab.title,
     };
   }
 
@@ -270,11 +271,11 @@ export default class TabManager {
 export function initializeTabManager(window: BrowserWindow) {
   const tabManager: TabManager = TabManager.getInstance(window);
 
-  ipcMainHandle("tab:create", (payload) => {
+  CommandRegistry.register("tab:create", (payload) => {
     return tabManager.createNewTab(payload);
   });
 
-  ipcMainHandle("tab:close", (payload) => {
+  CommandRegistry.register("tab:close", (payload) => {
     try {
       return tabManager.closeTab(payload);
     } catch (e) {
@@ -282,11 +283,11 @@ export function initializeTabManager(window: BrowserWindow) {
     }
   });
 
-  ipcMainHandle("tab:switch", (payload) => {
+  CommandRegistry.register("tab:switch", (payload) => {
     return tabManager.switchToTab(payload);
   });
 
-  ipcMainHandle("tab:reorder", (payload) => {
+  CommandRegistry.register("tab:reorder", (payload) => {
     try {
       return tabManager.reorderTab(payload.fromIndex, payload.toIndex);
     } catch (e) {
@@ -294,9 +295,9 @@ export function initializeTabManager(window: BrowserWindow) {
     }
   });
 
-  ipcMainHandle("tab:getAll", () => tabManager.getTabs());
+  CommandRegistry.register("tab:getAll", () => tabManager.getTabs());
 
   ipcMainHandle("tab:getActive", () => tabManager.getActiveTab());
 
-  ipcMainOn("tab:hideAll", () => tabManager.hideAllTabs());
+  CommandRegistry.register("tab:hideAll", () => tabManager.hideAllTabs());
 }

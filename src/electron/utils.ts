@@ -22,10 +22,19 @@ export function ipcMainHandle<key extends keyof EventPayloadMapping>(
     | EventPayloadMapping[key]["response"]
     | undefined
 ) {
-  ipcMain.handle(channel, async (_event, payloadFromRenderer) => {
-    return await handler(payloadFromRenderer);
+  ipcMain.handle(channel, async (_event, payload) => {
+    return await handler(payload);
   });
 }
+
+
+// export function ipcMainHandle<key extends keyof EventPayloadMapping>(
+//   channel: key
+// ) {
+//   ipcMain.handle(channel, async (_event, {command, args}) => {
+//     return await handler(payload);
+//   });
+// }
 
 export function ipcWebContentsSend<key extends keyof EventPayloadMapping>(
   key: key,

@@ -5,12 +5,13 @@ import { useTabContext } from "../../contexts/TabContext";
 export default function Main() {
   const [extensions, setExtensions] = useState<ExtensionManifest[]>([]);
 
+  
   const {createNewTab} = useTabContext();
 
   async function fetchExtensions() {
     console.log("fetching extensions...");
-    const res = await window.ifusion.extensions.listExtensions();
-    setExtensions(res.data!);
+    const extensionsInfo = await window.ifusion.extensions.listExtensions();
+    setExtensions(extensionsInfo);
   }
 
   useEffect(() => {
