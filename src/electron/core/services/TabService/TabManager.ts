@@ -5,6 +5,8 @@ import { ipcMainHandle, ipcMainOn } from "../../../utils.js";
 import path from "path";
 import ExtensionManager from "../ExtensionService/ExtensionManager.js";
 import { CommandRegistry } from "../../registry/CommandRegistry/CommandRegistry.js";
+import { ServiceRegistry } from "../../registry/ServiceRegistry/ServiceRegistry.js";
+
 
 const headerHeight = 32;
 
@@ -45,14 +47,22 @@ export default class TabManager {
       },
     });
 
-    
-    
-
     // Loading the extension in the view
     // view.webContents.loadFile(path.join(extension.path));
     let manifest: ExtensionManifest;
     try {
-      manifest = await ExtensionManager.getInstance().loadExtension(extensionUniqueId, view);
+      // manifest = await ExtensionManager.getInstance().loadExtension(extensionUniqueId, view);
+
+      const extensionService = await ServiceRegistry.getService("ExtensionService");
+
+      const response = await extensionService.loadExtension(extensionUniqueId, view);
+
+      if(response.isSuccess){
+        manifest = response.data!;
+      } else{
+        // Throw error that the extension could not be loaded in the tab
+      }
+      
     } catch (error) {
       console.error(`Failed to load extension with uniqueId ${extensionUniqueId}:`, error);
       throw new Error(`Failed to create tab: ${error}`);
@@ -65,8 +75,8 @@ export default class TabManager {
     const newTab: Tab = {
       id,
       view,
-      title: manifest.name ?? "Title not available",
-      extensionUniqueId: manifest.uniqueId ?? "Extension uniqueId not available",
+      title: manifest!.name ?? "Title not available",
+      extensionUniqueId: manifest!.uniqueId ?? "Extension uniqueId not available",
     };
 
     this.tabs.push(newTab);

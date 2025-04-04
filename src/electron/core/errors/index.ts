@@ -11,3 +11,6 @@ export { default as ExtensionError } from "./ExtensionError.js";
 export { default as UnexpectedError } from "./UnexpectedError.js";
 export {default as DataParsingError} from "./DataParsingError.js";
 export {default as InvalidArgumentError} from "./InvalidArgumentError.js";
+export {default as ServiceError} from "./ServiceError.js";
+export {default as InvalidClassError} from "./InvalidClassError.js";
+export {default as ValidationError} from "./ValidationError.js";

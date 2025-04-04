@@ -20,6 +20,7 @@ import {
   DataParsingError,
   InvalidArgumentError,
 } from "../../errors/index.js";
+import { Mutex } from "async-mutex";
 
 // Define a fixed namespace UUID for deterministic ID generation
 const NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
@@ -48,6 +49,9 @@ class ExtensionManager {
 
   private db: Database | null = null;
   private dbInitPromise: Promise<void> | null = null; // For promise-based locking
+
+  private resourceLocks: Map<string, Mutex> = new Map();
+  private dbWriteLock = new Mutex(); // Global mutex for database writes
 
   /**
    * Private constructor to prevent direct instantiation.
@@ -85,6 +89,18 @@ class ExtensionManager {
     } catch (error) {
       throw new RepositoryError(`Repository not ready`, error as Error);
     }
+  }
+
+  // Get or create a mutex for a specific extension
+  private getResourceLock(uniqueId: string): Mutex {
+    if (!this.resourceLocks.has(uniqueId)) {
+      this.resourceLocks.set(uniqueId, new Mutex());
+    }
+    return this.resourceLocks.get(uniqueId)!;
+  }
+
+  async performDatabaseWrite<T>(operation: () => Promise<T>): Promise<T> {
+    return this.dbWriteLock.runExclusive(operation);
   }
 
   /**
@@ -195,12 +211,12 @@ class ExtensionManager {
   /**
    * Validates the extension manifest before installation.
    * If validation succeeds, a `uniqueId` field is added to the manifest.
-   * @param {string} extPath - The path to the extension directory.
+   * @param {string} extPath - Path to the manifest directory.
    * @returns {Promise<ExtensionManifest>} The validated manifest.
    * @throws {SchemaValidationError} If the manifest schema validation fails.
    * @throws {FileSystemError} If the manifest file cannot be accessed or read.
    */
-  async validateManifest(extPath: string): Promise<ExtensionManifest> {
+  async validateManifestFile(extPath: string): Promise<ExtensionManifest> {
     const manifestPath = path.join(extPath, "manifest.json");
     try {
       // Ensure manifest exists
@@ -240,8 +256,8 @@ class ExtensionManager {
 
   /**
    * Installs a new extension.
-   * @param {string} sourcePath - The path to the extension source directory.
-   * @returns {Promise<string>} The unique ID of the installed extension.
+   * @param {string} sourcePath - Path to the extension source directory.
+   * @returns {Promise<{ extensionName: string; uniqueId: string }>} The uniqueId and name of the installed extension.
    * @throws {FileSystemError} If the extension directory cannot be created, accessed, or copied.
    * @throws {ExtensionError} If the extension is already installed.
    * @throws {DatabaseError} If the repository database cannot be initialized or if the extension manifest cannot be inserted into the database.
@@ -251,114 +267,119 @@ class ExtensionManager {
    *
    * @todo Implement force-install.
    */
-  async installExtension(sourcePath: string): Promise<string> {
-    // Ensure the repository database is ready
-    try {
-      await this.ensureRepositoryReady();
-    } catch (error) {
-      if (error instanceof FileSystemError || error instanceof DatabaseError) {
-        throw new RepositoryError("Repository not ready", error);
-      }
-
-      throw new UnexpectedError(
-        "Unexpected error during repository initialization",
-        error as Error
-      );
-    }
-
+  async installExtension(sourcePath: string): Promise<{ extensionName: string; uniqueId: string }> {
     // Validate the extension manifest and get the manifest
     let manifest: ExtensionManifest;
     try {
-      manifest = await this.validateManifest(sourcePath);
+      manifest = await this.validateManifestFile(sourcePath);
     } catch (error) {
       throw error;
     }
 
-    const destinationPath = path.join(this.extensionsPath, manifest.uniqueId!);
+    // Get the lock
+    const lock = this.getResourceLock(manifest.uniqueId!);
 
-    // Check if the extension already exists
-    try {
-      await fs.access(destinationPath);
-
-      // If no error, the directory exists, so throw an extension-specific error
-      throw new ExtensionError("Extension is already installed.");
-    } catch (error: any) {
-      if (error instanceof ExtensionError) {
-        throw error;
-      }
-
-      if (error && typeof error.code === "string" && error.code !== "ENOENT") {
-        throw new FileSystemError(`Could not access directory at path: ${destinationPath}`, error);
-      }
-    }
-
-    // Create the extension folder
-    try {
-      await fs.mkdir(destinationPath, { recursive: true });
-    } catch (error) {
-      throw new FileSystemError(
-        `Failed to create directory for extension at path: ${destinationPath}`,
-        error as Error
-      );
-    }
-
-    // Copy all the data from the source directory
-    try {
-      await fs.cp(sourcePath, destinationPath, { recursive: true });
-    } catch (error) {
+    return lock.runExclusive(async () => {
+      // Ensure the repository database is ready
       try {
-        await fs.rm(destinationPath, { recursive: true, force: true }); // Rollback
-      } catch (rollbackError) {
-        // Rollback failed, throw a CriticalFileSystemError
-        throw new CriticalFileSystemError(
-          `Rollback failed after a failed copy operation during installation of the extension`,
-          rollbackError as Error
+        await this.ensureRepositoryReady();
+      } catch (error) {
+        throw new RepositoryError("Repository not ready", error as Error);
+      }
+
+      const destinationPath = path.join(this.extensionsPath, manifest.uniqueId!);
+
+      // Check if the extension already exists
+      try {
+        await fs.access(destinationPath);
+
+        // If no error, the directory exists, so throw an extension-specific error
+        throw new ExtensionError("Extension is already installed.");
+      } catch (error: any) {
+        if (error instanceof ExtensionError) {
+          throw error;
+        }
+
+        if (error && typeof error.code === "string" && error.code !== "ENOENT") {
+          throw new FileSystemError(
+            `Could not access directory at path: ${destinationPath}`,
+            error
+          );
+        }
+      }
+
+      // Create the extension folder
+      try {
+        await fs.mkdir(destinationPath, { recursive: true });
+      } catch (error) {
+        throw new FileSystemError(
+          `Failed to create directory for extension at path: ${destinationPath}`,
+          error as Error
         );
       }
 
-      throw new FileSystemError(
-        `Failed to copy extension from ${sourcePath} to ${destinationPath}`,
-        error as Error
-      );
-    }
-
-    // Add extension manifest to the repository
-    // Use transaction for atomicity
-    await this.db!.run("BEGIN TRANSACTION");
-    try {
-      const stmt = await this.db!.prepare(
-        `INSERT INTO extensions (uniqueId, name, version, entry, permissions, developer, category, description ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      );
-
-      await stmt.run(
-        manifest.uniqueId,
-        manifest.name,
-        manifest.version,
-        manifest.entry,
-        JSON.stringify(manifest.permissions),
-        manifest.developer,
-        manifest.category,
-        manifest.description
-      );
-
-      await stmt.finalize();
-      await this.db!.run("COMMIT");
-    } catch (error) {
+      // Copy all the data from the source directory
       try {
-        await this.db!.run("ROLLBACK");
-      } catch (rollbackError) {
-        throw new CriticalDatabaseError(
-          "Rollback failed after a failed extension manifest insertion. Database might be in an inconsistent state.",
-          rollbackError as Error
+        await fs.cp(sourcePath, destinationPath, { recursive: true });
+      } catch (error) {
+        try {
+          await fs.rm(destinationPath, { recursive: true, force: true }); // Rollback
+        } catch (rollbackError) {
+          // Rollback failed, throw a CriticalFileSystemError
+          throw new CriticalFileSystemError(
+            `Rollback failed after a failed copy operation during installation of the extension`,
+            rollbackError as Error
+          );
+        }
+
+        throw new FileSystemError(
+          `Failed to copy extension from ${sourcePath} to ${destinationPath}`,
+          error as Error
         );
       }
 
-      throw new DatabaseError("Failed to insert extension manifest into database", error as Error);
-    }
+      // Add extension manifest to the repository database.
+      await this.performDatabaseWrite(async () => {
+        await this.db!.run("BEGIN TRANSACTION");
+        try {
+          const stmt = await this.db!.prepare(
+            `INSERT INTO extensions (uniqueId, name, version, entry, permissions, developer, category, description ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          );
 
-    // console.log(`Extension installed successfuly. Assigned uniqueid: ${manifest.uniqueId}`);
+          await stmt.run(
+            manifest.uniqueId,
+            manifest.name,
+            manifest.version,
+            manifest.entry,
+            JSON.stringify(manifest.permissions),
+            manifest.developer,
+            manifest.category,
+            manifest.description
+          );
 
-    return manifest.uniqueId as string;
+          await stmt.finalize();
+          await this.db!.run("COMMIT");
+        } catch (error) {
+          try {
+            await this.db!.run("ROLLBACK");
+          } catch (rollbackError) {
+            throw new CriticalDatabaseError(
+              "Rollback failed after a failed extension manifest insertion. Database might be in an inconsistent state.",
+              rollbackError as Error
+            );
+          }
+
+          throw new DatabaseError(
+            "Failed to insert extension manifest into database",
+            error as Error
+          );
+        }
+      });
+
+      console.log(`Extension installed successfuly. Assigned uniqueid: ${manifest.uniqueId}`);
+
+      return { extensionName: manifest.name, uniqueId: manifest.uniqueId! };
+    });
   }
 
   /**
@@ -371,58 +392,58 @@ class ExtensionManager {
    * @throws {CriticalDatabaseError} If the rollback fails after a failed database transaction.
    */
   async uninstallExtension(uniqueId: string): Promise<string> {
-    // Making sure the repository database is ready
-    try {
-      await this.ensureRepositoryReady();
-    } catch (error) {
-      if (error instanceof FileSystemError || error instanceof DatabaseError) {
-        throw new RepositoryError("Repository not ready", error);
+    // Acquire the lock for the specific extension
+    const lock = this.getResourceLock(uniqueId);
+
+    return lock.runExclusive(async () => {
+      // Making sure the repository database is ready
+      try {
+        await this.ensureRepositoryReady();
+      } catch (error) {
+        throw new RepositoryError("Repository not ready", error as Error);
       }
 
-      throw new UnexpectedError(
-        "Unexpected error during repository initialization",
-        error as Error
-      );
-    }
+      const extPath = path.join(this.extensionsPath, uniqueId);
 
-    const extPath = path.join(this.extensionsPath, uniqueId);
-
-    // Remove the directory and its contents
-    try {
-      await fs.rm(extPath, { recursive: true, force: true });
-    } catch (error) {
-      throw new FileSystemError(
-        `Failed to remove extension directory at path: ${extPath}`,
-        error as Error
-      );
-    }
-
-    // Remove the extension entry from repository database
-    await this.db!.run("BEGIN TRANSACTION");
-    try {
-      const stmt = await this.db!.prepare("DELETE FROM extensions WHERE uniqueId = ?");
-      await stmt.run(uniqueId);
-      await stmt.finalize();
-      await this.db!.run("COMMIT");
-    } catch (error) {
+      // Remove the directory and its contents
       try {
-        await this.db!.run("ROLLBACK");
-      } catch (rollbackError) {
-        throw new CriticalDatabaseError(
-          `Rollback failed after a failed uninstall operation for extension ${uniqueId}. Database might be in an inconsistent state.`,
-          rollbackError as Error
+        await fs.rm(extPath, { recursive: true, force: true });
+      } catch (error) {
+        throw new FileSystemError(
+          `Failed to remove extension directory at path: ${extPath}`,
+          error as Error
         );
       }
 
-      throw new DatabaseError(
-        `Failed to uninstall extension ${uniqueId} from the database.`,
-        error as Error
-      );
-    }
+      // Remove the extension entry from repository database
+      await this.performDatabaseWrite(async () => {
+        await this.db!.run("BEGIN TRANSACTION");
+        try {
+          const stmt = await this.db!.prepare("DELETE FROM extensions WHERE uniqueId = ?");
+          await stmt.run(uniqueId);
+          await stmt.finalize();
+          await this.db!.run("COMMIT");
+        } catch (error) {
+          try {
+            await this.db!.run("ROLLBACK");
+          } catch (rollbackError) {
+            throw new CriticalDatabaseError(
+              `Rollback failed after a failed uninstall operation for extension ${uniqueId}. Database might be in an inconsistent state.`,
+              rollbackError as Error
+            );
+          }
 
-    console.log(`Extension with uniqueId: ${uniqueId} uninstall successful.`);
+          throw new DatabaseError(
+            `Failed to uninstall extension ${uniqueId} from the database.`,
+            error as Error
+          );
+        }
+      });
 
-    return uniqueId;
+      console.log(`Extension with uniqueId: ${uniqueId} uninstall successful.`);
+
+      return uniqueId;
+    });
   }
 
   /**
@@ -440,14 +461,7 @@ class ExtensionManager {
     try {
       await this.ensureRepositoryReady();
     } catch (error) {
-      if (error instanceof FileSystemError || error instanceof DatabaseError) {
-        throw new RepositoryError("Repository not ready", error);
-      }
-
-      throw new UnexpectedError(
-        "Unexpected error during repository initialization",
-        error as Error
-      );
+      throw new RepositoryError("Repository not ready", error as Error);
     }
 
     // Retrieve extensions from the database
@@ -498,35 +512,42 @@ class ExtensionManager {
     }
   }
 
-  /**
-   * Updates an existing extension by uninstalling and reinstalling it.
-   * @param {string} uniqueId - The unique ID of the extension to update.
-   * @param {string} sourcePath - The path to the new extension source directory.
-   * @returns {Promise<string>} The unique ID of the updated extension.
-   *
-   * @throws {ExtensionError} If the update fails during the uninstall or reinstall phase.
-   */
-  async updateExtension(uniqueId: string, sourcePath: string): Promise<string> {
-    // Phase 1: Uninstall
-    try {
-      await this.uninstallExtension(uniqueId);
-    } catch (error) {
-      throw new ExtensionError(
-        `Update failed during uninstall phase for extension ${uniqueId}.`,
-        error as Error
-      );
-    }
 
-    // Phase 2: Re-Install
-    try {
-      return this.installExtension(sourcePath);
-    } catch (error) {
-      throw new ExtensionError(
-        `Update failed during reinstall phase for extension ${uniqueId}.`,
-        error as Error
-      );
-    }
-  }
+  
+  // /**
+  //  * Updates an existing extension by uninstalling and reinstalling it.
+  //  * @param {string} uniqueId - The unique ID of the extension to update.
+  //  * @param {string} sourcePath - The path to the new extension source directory.
+  //  * @returns {Promise<string>} The unique ID of the updated extension.
+  //  *
+  //  * @throws {ExtensionError} If the update fails during the uninstall or reinstall phase.
+  //  *
+  //  * @todo What if update fails during uninstall phase? Implement rollback mechanism.
+  //  * @todo implement updateExtension again.
+  //  */
+  // async updateExtension(uniqueId: string, sourcePath: string): Promise<string> {
+  //   // Phase 1: Uninstall
+  //   try {
+  //     await this.uninstallExtension(uniqueId);
+  //   } catch (error) {
+  //     throw new ExtensionError(
+  //       `Update failed during uninstall phase for extension ${uniqueId}.`,
+  //       error as Error
+  //     );
+  //   }
+
+  //   // Phase 2: Re-Install
+  //   try {
+  //     return this.installExtension(sourcePath);
+  //   } catch (error) {
+  //     throw new ExtensionError(
+  //       `Update failed during reinstall phase for extension ${uniqueId}.`,
+  //       error as Error
+  //     );
+  //   }
+  // }
+
+  
 
   /**
    * Enables extension.
@@ -538,53 +559,58 @@ class ExtensionManager {
    
    */
   async enableExtension(uniqueId: string) {
-    // Ensure the repository database is ready
-    try {
-      await this.ensureRepositoryReady();
-    } catch (error) {
-      if (error instanceof FileSystemError || error instanceof DatabaseError) {
-        throw new RepositoryError("Repository not ready", error);
-      }
-      throw new UnexpectedError(
-        "Unexpected error during repository initialization",
-        error as Error
-      );
-    }
+    // Acquire the lock for the specific extension
+    const lock = this.getResourceLock(uniqueId);
 
-    // Begin database transaction
-    await this.db!.run("BEGIN TRANSACTION");
-    try {
-      const stmt = await this.db!.prepare(`UPDATE extensions SET isEnabled = 1 WHERE uniqueId = ?`);
-
-      const result = await stmt.run(uniqueId);
-      await stmt.finalize();
-
-      // Check if the extension exists
-      if (result.changes === 0) {
-        throw new ExtensionError(`Extension with unique ID ${uniqueId} not found.`);
-      }
-
-      // Commit the transaction
-      await this.db!.run("COMMIT");
-    } catch (error) {
+    return lock.runExclusive(async () => {
+      // Ensure the repository database is ready
       try {
-        await this.db!.run("ROLLBACK");
-      } catch (rollbackError) {
-        throw new CriticalDatabaseError(
-          `Rollback failed during enable operation for extension ${uniqueId}. Database might be in an inconsistent state.`,
-          rollbackError as Error
-        );
+        await this.ensureRepositoryReady();
+      } catch (error) {
+        throw new RepositoryError("Repository not ready", error as Error);
       }
 
-      if (error instanceof ExtensionError) {
-        throw error; // Re-throw extension-specific errors
-      }
+      // Perform the database write operation
+      await this.performDatabaseWrite(async () => {
+        await this.db!.run("BEGIN TRANSACTION");
+        try {
+          const stmt = await this.db!.prepare(
+            `UPDATE extensions SET isEnabled = 1 WHERE uniqueId = ?`
+          );
 
-      throw new DatabaseError(
-        `Failed to enable extension with unique ID ${uniqueId}.`,
-        error as Error
-      );
-    }
+          const result = await stmt.run(uniqueId);
+          await stmt.finalize();
+
+          // Check if the extension exists
+          if (result.changes === 0) {
+            throw new ExtensionError(`Extension with unique ID ${uniqueId} not found.`);
+          }
+
+          // Commit the transaction
+          await this.db!.run("COMMIT");
+        } catch (error) {
+          try {
+            await this.db!.run("ROLLBACK");
+          } catch (rollbackError) {
+            throw new CriticalDatabaseError(
+              `Rollback failed during enable operation for extension ${uniqueId}. Database might be in an inconsistent state.`,
+              rollbackError as Error
+            );
+          }
+
+          if (error instanceof ExtensionError) {
+            throw error; // Re-throw extension-specific errors
+          }
+
+          throw new DatabaseError(
+            `Failed to enable extension with unique ID ${uniqueId}.`,
+            error as Error
+          );
+        }
+      });
+
+      console.log(`Extension with uniqueId: ${uniqueId} has been enabled.`);
+    });
   }
 
   /**
@@ -596,55 +622,58 @@ class ExtensionManager {
    * @throws {RepositoryError} If the repository is not ready.
    */
   async disableExtension(uniqueId: string) {
-    // Ensure the repository database is ready
-    try {
-      await this.ensureRepositoryReady();
-    } catch (error) {
-      if (error instanceof FileSystemError || error instanceof DatabaseError) {
-        throw new RepositoryError("Repository not ready", error);
-      }
-      throw new UnexpectedError(
-        "Unexpected error during repository initialization",
-        error as Error
-      );
-    }
+    // Acquire the lock for the specific extension
+    const lock = this.getResourceLock(uniqueId);
 
-    // Begin database transaction
-    await this.db!.run("BEGIN TRANSACTION");
-    try {
-      const stmt = await this.db!.prepare(`UPDATE extensions SET isEnabled = 0 WHERE uniqueId = ?`);
-
-      const result = await stmt.run(uniqueId);
-      await stmt.finalize();
-
-      // Check if the extension exists
-      if (result.changes === 0) {
-        throw new ExtensionError(`Extension with unique ID ${uniqueId} not found.`);
-      }
-
-      // Commit the transaction
-      await this.db!.run("COMMIT");
-    } catch (error) {
-      // Attempt to rollback the transaction
+    return lock.runExclusive(async () => {
+      // Ensure the repository database is ready
       try {
-        await this.db!.run("ROLLBACK");
-      } catch (rollbackError) {
-        throw new CriticalDatabaseError(
-          `Rollback failed during disable operation for extension ${uniqueId}. Database might be in an inconsistent state.`,
-          rollbackError as Error
-        );
+        await this.ensureRepositoryReady();
+      } catch (error) {
+        throw new RepositoryError("Repository not ready", error as Error);
       }
 
-      if (error instanceof ExtensionError) {
-        throw error; // Re-throw extension-specific errors
-      }
+      // Perform the database write operation
+      await this.performDatabaseWrite(async () => {
+        await this.db!.run("BEGIN TRANSACTION");
+        try {
+          const stmt = await this.db!.prepare(
+            `UPDATE extensions SET isEnabled = 0 WHERE uniqueId = ?`
+          );
 
-      // Throw a concise error message with context
-      throw new DatabaseError(
-        `Failed to disable extension with unique ID ${uniqueId}.`,
-        error as Error
-      );
-    }
+          const result = await stmt.run(uniqueId);
+          await stmt.finalize();
+
+          // Check if the extension exists
+          if (result.changes === 0) {
+            throw new ExtensionError(`Extension with unique ID ${uniqueId} not found.`);
+          }
+
+          // Commit the transaction
+          await this.db!.run("COMMIT");
+        } catch (error) {
+          // Attempt to rollback the transaction
+          try {
+            await this.db!.run("ROLLBACK");
+          } catch (rollbackError) {
+            throw new CriticalDatabaseError(
+              `Rollback failed during disable operation for extension ${uniqueId}. Database might be in an inconsistent state.`,
+              rollbackError as Error
+            );
+          }
+
+          if (error instanceof ExtensionError) {
+            throw error; // Re-throw extension-specific errors
+          }
+
+          // Throw a concise error message with context
+          throw new DatabaseError(
+            `Failed to disable extension with unique ID ${uniqueId}.`,
+            error as Error
+          );
+        }
+      });
+    });
   }
 
   /**
@@ -656,84 +685,92 @@ class ExtensionManager {
    * @throws {ExtensionError} If the extension does not exist or is disabled.
    * @throws {FileSystemError} If the entry point file cannot be accessed.
    * @throws {DatabaseError} If the extension details cannot be retrieved from the database.
+   * @throws {InvalidArgumentError} If the view passed is not valid.
    */
   async loadExtension(uniqueId: string, view: WebContentsView): Promise<ExtensionManifest> {
     // Validate the WebContentsView
     if (!view || !view.webContents) {
-      throw new InvalidArgumentError("Invalid WebContentsView provided.")
+      throw new InvalidArgumentError("Invalid WebContentsView provided");
     }
 
-    // Ensure the repository database is ready
-    try {
-      await this.ensureRepositoryReady();
-    } catch (error) {
-      if (error instanceof FileSystemError || error instanceof DatabaseError) {
-        throw new RepositoryError("Repository not ready", error);
-      }
-      throw new UnexpectedError(
-        "Unexpected error during repository initialization",
-        error as Error
+    // Acquire the lock for the specific extension
+    const lock = this.getResourceLock(uniqueId);
+
+    console.log(
+      `[${new Date().toISOString()}] [loadExtension] Waiting for lock on extension: ${uniqueId}`
+    );
+
+    return lock.runExclusive(async () => {
+      console.log(
+        `[${new Date().toISOString()}] [loadExtension] Acquired lock for extension: ${uniqueId}`
       );
-    }
 
-    // Fetch extension details from the repository database
-    let extension: ExtensionManifest;
-    try {
-      const stmt = await this.db!.prepare("SELECT * FROM extensions WHERE uniqueId = ?");
-
-      const result = await stmt.get(uniqueId);
-
-      await stmt.finalize();
-
-      // If extension doesn't exist
-      if (!result) {
-        throw new ExtensionError(`Extension with unique ID ${uniqueId} not found.`);
+      // Ensure the repository database is ready
+      try {
+        await this.ensureRepositoryReady();
+      } catch (error) {
+        throw new RepositoryError("Repository not ready", error as Error);
       }
 
-      extension = {
-        ...result,
-        permissions: JSON.parse(result.permissions),
-      };
+      // Fetch extension details from the repository database
+      let extension: ExtensionManifest;
+      try {
+        const stmt = await this.db!.prepare("SELECT * FROM extensions WHERE uniqueId = ?");
 
-      // Check if the extension is enabled
-      if (extension.isEnabled === 0) {
-        throw new ExtensionError(`Extension ${extension.name} is disabled.`);
+        const result = await stmt.get(uniqueId);
+
+        await stmt.finalize();
+
+        // If extension doesn't exist
+        if (!result) {
+          throw new ExtensionError(`Extension not found.`);
+        }
+
+        extension = {
+          ...result,
+          permissions: JSON.parse(result.permissions),
+        };
+
+        // Check if the extension is enabled
+        if (extension.isEnabled === 0) {
+          throw new ExtensionError(`Extension ${extension.name} is disabled.`);
+        }
+      } catch (error) {
+        if (error instanceof ExtensionError) {
+          throw error; // Re-throw extension-specific errors
+        }
+
+        throw new DatabaseError(
+          `Failed to retrieve extension with unique ID ${uniqueId} from the database.`,
+          error as Error
+        );
       }
-    } catch (error) {
-      if (error instanceof ExtensionError) {
-        throw error; // Re-throw extension-specific errors
+
+      // Resolve and verify extension path
+      const extPath = path.resolve(this.extensionsPath, uniqueId);
+      const entryFilePath = path.join(extPath, extension.entry);
+
+      // Ensuring entry file exists
+      try {
+        await fs.access(entryFilePath, fs.constants.F_OK);
+      } catch (error) {
+        throw new FileSystemError(
+          `Entry point file not found for extension ${uniqueId} at path: ${entryFilePath}`,
+          error as Error
+        );
       }
 
-      throw new DatabaseError(
-        `Failed to retrieve extension with unique ID ${uniqueId} from the database.`,
-        error as Error
-      );
-    }
+      try {
+        await view.webContents.loadFile(entryFilePath);
+      } catch (error) {
+        throw new ExtensionError(
+          `Failed to load extension ${extension.name} into the WebContentsView.`,
+          error as Error
+        );
+      }
 
-    // Resolve and verify extension path
-    const extPath = path.resolve(this.extensionsPath, uniqueId);
-    const entryFilePath = path.join(extPath, extension.entry);
-
-    // Ensuring entry file exists
-    try {
-      await fs.access(entryFilePath);
-    } catch (error) {
-      throw new FileSystemError(
-        `Entry point file not found for extension ${uniqueId} at path: ${entryFilePath}`,
-        error as Error
-      );
-    }
-
-    try {
-      await view.webContents.loadFile(entryFilePath);
-    } catch (error) {
-      throw new ExtensionError(
-        `Failed to load extension ${extension.name} into the WebContentsView.`,
-        error as Error
-      );
-    }
-
-    return extension;
+      return extension;
+    });
   }
 }
 
@@ -762,17 +799,17 @@ export function initializeExtensionManager(window: BrowserWindow): ExtensionMana
     return await extensionManager.listExtensions();
   });
 
-  CommandRegistry.register("extension:update", async (payload) => {
-    return extensionManager.updateExtension(payload.uniqueId, payload.sourcePath);
-  });
+  // CommandRegistry.register("extension:update", async (payload) => {
+  //   return extensionManager.updateExtension(payload.uniqueId, payload.sourcePath);
+  // });
 
-  CommandRegistry.register("extension:enable", async (payload) => {
-    return await extensionManager.enableExtension(payload);
-  });
+  // CommandRegistry.register("extension:enable", async (payload) => {
+  //   return await extensionManager.enableExtension(payload);
+  // });
 
-  CommandRegistry.register("extension:disable", async (payload) => {
-    return await extensionManager.disableExtension(payload);
-  });
+  // CommandRegistry.register("extension:disable", async (payload) => {
+  //   return await extensionManager.disableExtension(payload);
+  // });
 
   return extensionManager;
 }

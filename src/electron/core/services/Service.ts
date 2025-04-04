@@ -7,11 +7,11 @@
 
 
 export default class Service {
-  start(){
+  async start(){
     console.log(`${this.constructor.name} started.`);
   }
 
-  stop(){
+  async stop(){
     console.log(`${this.constructor.name} stopped.`)
   }
 }
