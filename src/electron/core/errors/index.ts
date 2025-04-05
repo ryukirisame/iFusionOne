@@ -14,3 +14,4 @@ export {default as InvalidArgumentError} from "./InvalidArgumentError.js";
 export {default as ServiceError} from "./ServiceError.js";
 export {default as InvalidClassError} from "./InvalidClassError.js";
 export {default as ValidationError} from "./ValidationError.js";
+export {default as TabError} from "./TabError.js";

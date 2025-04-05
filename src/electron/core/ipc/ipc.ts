@@ -7,7 +7,8 @@ let channels: string[] = ["extension", "tab", "frame-action"];
 export default function setupIPCChannels() {
   for (let channel of channels) {
 
-    ipcMain.handle(channel, async (_, command: string, payload: any) => {
+    ipcMain.handle(channel, async (event, command: string, payload: any) => {
+        event.senderFrame?.url
       return CommandRegistry.execute(command, payload);
     });
 

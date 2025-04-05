@@ -7,8 +7,7 @@ declare global {
   // Maps service names to their constructors
   type ServicesList = {
     ExtensionService: ExtensionService;
-
+    TabService: TabService;
     // Add more services here
   };
 }
-

@@ -19,14 +19,15 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   async function createNewTab(extensionUniqueId: string) {
     let response = await window.ifusion.tabs.createNewTab(extensionUniqueId);
-
-    if(!response.data){
-        console.log("Extension disabled");
-        return ;
-    }
     
+    console.log(response);
+    if (!response) {
+      console.log("Extension disabled");
+      return;
+    }
+
     setActiveTabIndex(tabs.length);
-    setTabs((prevTabs) => [...prevTabs, response.data!]);
+    setTabs((prevTabs) => [...prevTabs, response]);
   }
 
   async function switchToTab(tabId: string) {

@@ -21,6 +21,9 @@ import {
   InvalidArgumentError,
 } from "../../errors/index.js";
 import { Mutex } from "async-mutex";
+import Service from "../Service.js";
+import ExtensionService from "./ExtensionService.js";
+import { ServiceRegistry } from "../../registry/ServiceRegistry/ServiceRegistry.js";
 
 // Define a fixed namespace UUID for deterministic ID generation
 const NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
@@ -774,9 +777,10 @@ class ExtensionManager {
   }
 }
 
-export function initializeExtensionManager(window: BrowserWindow): ExtensionManager {
-  const extensionManager: ExtensionManager = ExtensionManager.getInstance();
-  extensionManager.initialize(); // Don't wait for initialization for now
+export async function initializeExtensionManager(window: BrowserWindow): Promise<ExtensionService> {
+
+  const extensionService: ExtensionService = await ServiceRegistry.getService("ExtensionService");
+  
 
   CommandRegistry.register("extension:install", async () => {
     const path = await DialogService.selectFolder(window);
@@ -785,18 +789,18 @@ export function initializeExtensionManager(window: BrowserWindow): ExtensionMana
       return;
     }
     try {
-      return await extensionManager.installExtension(path);
+      return await extensionService.installExtension(path);
     } catch (error) {
       console.error(error);
     }
   });
 
   CommandRegistry.register("extension:uninstall", async (uniqueId: string) => {
-    return await extensionManager.uninstallExtension(uniqueId);
+    return await extensionService.uninstallExtension(uniqueId);
   });
 
   CommandRegistry.register("extension:list", async () => {
-    return await extensionManager.listExtensions();
+    return await extensionService.listExtensions();
   });
 
   // CommandRegistry.register("extension:update", async (payload) => {
@@ -811,7 +815,7 @@ export function initializeExtensionManager(window: BrowserWindow): ExtensionMana
   //   return await extensionManager.disableExtension(payload);
   // });
 
-  return extensionManager;
+  return extensionService;
 }
 
 export default ExtensionManager;

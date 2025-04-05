@@ -65,7 +65,7 @@ declare global {
   interface ifusion {
     // Exposing tab management APIs to ifusion under tabs object
     tabs: {
-      createNewTab: (extensionUniqueId: string) => Promise<Result | Result<TabUIInfo>>;
+      createNewTab: (extensionUniqueId: string) => Promise<Promise<TabUIInfo>>;
 
       closeTab: (tabId: string) => Promise<Result<{ activeTabIndex: number }>>;
 

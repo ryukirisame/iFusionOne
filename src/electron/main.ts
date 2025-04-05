@@ -1,25 +1,24 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
+import { app, BrowserWindow,  Menu } from "electron";
 import path from "path";
-import { ipcMainOn, isDev, ipcMainHandle } from "./utils.js";
+import { ipcMainOn, isDev } from "./utils.js";
 import { getPreloadFilePath } from "./pathResolver.js";
-import fsPromises from "fs/promises";
 
 import { initializeTabManager } from "./core/services/TabService/TabManager.js";
-import DialogService from "./DialogService/DialogService.js";
-import { pathToFileURL } from "url";
-import ExtensionManager, {
-  initializeExtensionManager,
-} from "./core/services/ExtensionService/ExtensionManager.js";
+
+import { initializeExtensionManager } from "./core/services/ExtensionService/ExtensionManager.js";
 import setupIPCChannels from "./core/ipc/ipc.js";
+import { ExtensionService } from "./core/services/services.js";
+import { ServiceRegistry } from "./core/registry/ServiceRegistry/ServiceRegistry.js";
+import TabService from "./core/services/TabService/TabService.js";
 
 Menu.setApplicationMenu(null);
 
 let mainWindow: BrowserWindow;
 
-let extensionManager: ExtensionManager;
-
 app.whenReady().then(() => {
   mainWindow = new BrowserWindow({
+    minWidth: 600,
+    minHeight: 600,
     webPreferences: {
       preload: getPreloadFilePath(),
     },
@@ -35,58 +34,62 @@ app.whenReady().then(() => {
 
   ipcMainOn("sendFrameAction", frameActionHandler);
 
+  // Registering ExtensionService to ServiceRegistry
+  ServiceRegistry.registerService("ExtensionService", ExtensionService);
+  ServiceRegistry.registerService("TabService", TabService);
+
   // Initalizing managers
   initializeTabManager(mainWindow);
-  extensionManager = initializeExtensionManager(mainWindow);
+  initializeExtensionManager(mainWindow);
 
   setupIPCChannels();
 });
 
-async function selectFolderAndReadFile() {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    filters: [{ name: "All Files", extensions: ["*"] }],
-    properties: ["openDirectory"],
-  });
+// async function selectFolderAndReadFile() {
+//   const { canceled, filePaths } = await dialog.showOpenDialog({
+//     filters: [{ name: "All Files", extensions: ["*"] }],
+//     properties: ["openDirectory"],
+//   });
 
-  if (canceled) {
-    console.log("Folder selection cancelled");
+//   if (canceled) {
+//     console.log("Folder selection cancelled");
 
-    return;
-  }
+//     return;
+//   }
 
-  const selectedFolderPath = filePaths[0];
+//   const selectedFolderPath = filePaths[0];
 
-  try {
-    const files = await fsPromises.readdir(selectedFolderPath);
+//   try {
+//     const files = await fsPromises.readdir(selectedFolderPath);
 
-    if (files.length === 0) {
-      console.log("The folder is empty");
-      return;
-    }
+//     if (files.length === 0) {
+//       console.log("The folder is empty");
+//       return;
+//     }
 
-    const indexHTML = files.find((file) => file === "index.html");
+//     const indexHTML = files.find((file) => file === "index.html");
 
-    // if index.html file exists
-    if (indexHTML) {
-      const fullPath = path.join(selectedFolderPath, "index.html");
+//     // if index.html file exists
+//     if (indexHTML) {
+//       const fullPath = path.join(selectedFolderPath, "index.html");
 
-      const extensionInfo = extensionManager.installExtension(fullPath);
+//       const extensionInfo = extensionManager.installExtension(fullPath);
 
-      return extensionInfo;
-      // dialog.showMessageBox({
-      //   message: `${fullPath}`,
-      //   type: "info",
-      // });
-    } else {
-      dialog.showMessageBox({
-        message: "index.html does not exist in the selected directory",
-        type: "error",
-      });
-    }
-  } catch (err) {
-    console.log("Error reading directory", err);
-  }
-}
+//       return extensionInfo;
+//       // dialog.showMessageBox({
+//       //   message: `${fullPath}`,
+//       //   type: "info",
+//       // });
+//     } else {
+//       dialog.showMessageBox({
+//         message: "index.html does not exist in the selected directory",
+//         type: "error",
+//       });
+//     }
+//   } catch (err) {
+//     console.log("Error reading directory", err);
+//   }
+// }
 
 function frameActionHandler(payload: FrameWindowAction) {
   switch (payload) {
@@ -105,6 +108,8 @@ function frameActionHandler(payload: FrameWindowAction) {
   }
 }
 
-app.on("before-quit", () => {
-  extensionManager.close();
+app.on("before-quit", async () => {
+  // extensionManager.stop();
+
+  await ServiceRegistry.stopAllService();
 });

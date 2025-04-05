@@ -3,14 +3,16 @@ import BaseError from "../../errors/BaseError.js";
 import { ServiceRegistry } from "../../registry/ServiceRegistry/ServiceRegistry.js";
 import Service from "../Service.js";
 import ExtensionManager from "./ExtensionManager.js";
+import UnexpectedError from "../../errors/UnexpectedError.js";
 
-type ExtensionServiceResponse<T> = {
-  isSuccess: boolean;
-  message: string;
-  error?: string[]; // The error message chain
-  data?: T;
-};
 
+
+/**
+ * `ExtensionService` is responsible for managing extensions in the application.
+ * It provides methods to install, uninstall, load, and list extensions, as well as handle errors gracefully.
+ *
+ * This service interacts with the `ExtensionManager` to perform the actual operations.
+ */
 export default class ExtensionService extends Service {
   private extensionManager: ExtensionManager;
 
@@ -20,7 +22,14 @@ export default class ExtensionService extends Service {
     this.extensionManager.initialize();
   }
 
-  // Overriding stop()
+  /**
+   * Stops the `ExtensionService` by closing the extension manager's repository database.
+   *
+   * This method overrides the `stop` method in the base `Service` class.
+   *
+   * @example
+   * await extensionService.stop();
+   */
   async stop() {
     // Closing the repository database.
     await this.extensionManager.close();
@@ -28,10 +37,24 @@ export default class ExtensionService extends Service {
     super.stop();
   }
 
+  /**
+   * Installs an extension from the given source path.
+   *
+   * @param sourcePath - The file path of the extension to install.
+   * @returns A response object containing the installation status, message, and extension details.
+   *
+   * * @example
+   * const response = await extensionService.installExtension("/path/to/extension");
+   * if (response.isSuccess) {
+   *   console.log("Extension installed:", response.data);
+   * } else {
+   *   console.error("Failed to install extension:", response.error);
+   * }
+   */
   async installExtension(
     sourcePath: string
-  ): Promise<ExtensionServiceResponse<{ uniqueId: string }>> {
-    let response: ExtensionServiceResponse<{ uniqueId: string }>;
+  ): Promise<ExtensionServiceResponse<{ uniqueId: string; extensionName: string }>> {
+    let response: ExtensionServiceResponse<{ uniqueId: string; extensionName: string }>;
 
     try {
       let { extensionName, uniqueId } = await this.extensionManager.installExtension(sourcePath);
@@ -39,18 +62,18 @@ export default class ExtensionService extends Service {
       response = {
         isSuccess: true,
         message: `${extensionName} installed successfully.`,
-        data: { uniqueId },
+        data: { extensionName, uniqueId },
       };
 
       console.log(`${extensionName} installed successfully.`, response);
     } catch (error) {
-      // Handle errors
-      let errorMessageChain: string[] = [];
+
+      let err: BaseError;
 
       if (error instanceof BaseError) {
-        errorMessageChain = error.getCauseChainArray();
+        err = error;
       } else {
-        errorMessageChain = [(error as Error).message || "An unknown error occurred."];
+        err = new UnexpectedError("Unexpected error occurred while loading the extension. Please check logs for more information.", error as Error);
 
         // Log the unknown error
         console.error(error);
@@ -59,7 +82,7 @@ export default class ExtensionService extends Service {
       response = {
         isSuccess: false,
         message: `Failed to install extension.`,
-        error: errorMessageChain,
+        error: err,
       };
 
       console.log("Failed to install extension", response);
@@ -68,6 +91,19 @@ export default class ExtensionService extends Service {
     return response;
   }
 
+  /**
+   * Uninstalls an extension by its unique ID.
+   * @param extensionUniqueId - The unique ID of the extension to uninstall.
+   * @returns A response object containing the uninstallation status, message, and unique ID of the uninstalled extension.
+   *
+   * @example
+   * const response = await extensionService.uninstallExtension("unique-extension-id");
+   * if (response.isSuccess) {
+   *   console.log("Extension uninstalled:", response.data);
+   * } else {
+   *   console.error("Failed to uninstall extension:", response.error);
+   * }
+   */
   async uninstallExtension(
     extensionUniqueId: string
   ): Promise<ExtensionServiceResponse<{ uniqueId: string }>> {
@@ -84,13 +120,13 @@ export default class ExtensionService extends Service {
 
       console.log(`Extension uninstall successful. UniqueId: ${extensionUniqueId}`);
     } catch (error) {
-      // Handle errors
-      let errorMessageChain: string[] = [];
+
+      let err: BaseError;
 
       if (error instanceof BaseError) {
-        errorMessageChain = error.getCauseChainArray();
+        err = error;
       } else {
-        errorMessageChain = [(error as Error).message || "An unknown error occurred."];
+        err = new UnexpectedError("Unknown error occurred while loading the extension. Please check logs for more information.", error as Error);
 
         // Log the unknown error
         console.error(error);
@@ -99,7 +135,7 @@ export default class ExtensionService extends Service {
       response = {
         isSuccess: false,
         message: `Failed to uninstall extension.`,
-        error: errorMessageChain,
+        error: err,
       };
 
       console.log("Failed to uninstall extension", response);
@@ -108,6 +144,21 @@ export default class ExtensionService extends Service {
     return response;
   }
 
+  /**
+   * Loads an extension into the given `WebContentsView`.
+   *
+   * @param extensionUniqueId - The unique ID of the extension to load.
+   * @param view - The `WebContentsView` where the extension will be loaded.
+   * @returns A response object containing the loading status, message, and extension manifest.
+   *
+   * @example
+   * const response = await extensionService.loadExtension("unique-extension-id", webContentsView);
+   * if (response.isSuccess) {
+   *   console.log("Extension loaded:", response.data);
+   * } else {
+   *   console.error("Failed to load extension:", response.error);
+   * }
+   */
   async loadExtension(
     extensionUniqueId: string,
     view: WebContentsView
@@ -125,13 +176,12 @@ export default class ExtensionService extends Service {
 
       console.log(`Extension load successful. manifest: ${manifest}`);
     } catch (error) {
-      // Handle errors
-      let errorMessageChain: string[] = [];
+      let err: BaseError;
 
       if (error instanceof BaseError) {
-        errorMessageChain = error.getCauseChainArray();
+        err = error;
       } else {
-        errorMessageChain = [(error as Error).message || "An unknown error occurred."];
+        err = new UnexpectedError("Unknown error occurred while loading the extension. Please check logs for more information.", error as Error);
 
         // Log the unknown error
         console.error(error);
@@ -140,7 +190,7 @@ export default class ExtensionService extends Service {
       response = {
         isSuccess: false,
         message: `Failed to load extension.`,
-        error: errorMessageChain,
+        error: err,
       };
 
       console.log("Failed to load extension", response);
@@ -149,7 +199,20 @@ export default class ExtensionService extends Service {
     return response;
   }
 
-  async listExtension(): Promise<ExtensionServiceResponse<ExtensionManifest[]>> {
+  /**
+   * Lists all installed extensions.
+   *
+   * @returns A response object containing the list of extension manifests.
+   *
+   * @example
+   * const response = await extensionService.listExtensions();
+   * if (response.isSuccess) {
+   *   console.log("Extensions:", response.data);
+   * } else {
+   *   console.error("Failed to fetch extensions:", response.error);
+   * }
+   */
+  async listExtensions(): Promise<ExtensionServiceResponse<ExtensionManifest[]>> {
     let response: ExtensionServiceResponse<ExtensionManifest[]>;
 
     try {
@@ -161,16 +224,17 @@ export default class ExtensionService extends Service {
         data: extensionManifests,
       };
 
-      console.log(`Extensions fetched successful. manifests: ${extensionManifests}`);
+      console.log(
+        `Extensions fetched successful. manifests: ${JSON.stringify(extensionManifests)}`
+      );
     } catch (error) {
-
       // Handle errors
-      let errorMessageChain: string[] = [];
+      let err: BaseError;
 
       if (error instanceof BaseError) {
-        errorMessageChain = error.getCauseChainArray();
+        err = error;
       } else {
-        errorMessageChain = [(error as Error).message || "An unknown error occurred."];
+        err = new UnexpectedError("Unknown error occurred while loading the extension. Please check logs for more information.", error as Error);
 
         // Log the unknown error
         console.error(error);
@@ -179,7 +243,7 @@ export default class ExtensionService extends Service {
       response = {
         isSuccess: false,
         message: `Failed to fetch extensions.`,
-        error: errorMessageChain,
+        error: err,
       };
 
       console.log("Failed to fetch extensions", response);
@@ -205,7 +269,3 @@ export default class ExtensionService extends Service {
    * 
    */
 }
-
-// Registering ExtensionService to ServiceRegistry
-// ServiceRegistry.registerService("ExtensionService", ExtensionService);
-ServiceRegistry.registerService("ExtensionService", ExtensionService);

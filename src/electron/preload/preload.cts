@@ -11,7 +11,7 @@ const extensionAPIs = {
     return ipcRenderer.invoke("extension", "extension:uninstall", uniqueId);
   },
 
-  listExtensions() {
+  listExtensions()  {
     return ipcRenderer.invoke("extension","extension:list");
   },
 

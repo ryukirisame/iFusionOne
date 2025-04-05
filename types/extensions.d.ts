@@ -6,7 +6,7 @@ declare global {
     entry: string;
     permissions: string[];
     developer: string;
-    category: string;
+    category: ExtensionCategory;
     description: string;
     uniqueId?: string;
     installedAt?: string;
@@ -16,39 +16,17 @@ declare global {
 
   type ExtensionCategory = "Converter" | "Editor" | "Misc";
 
-  const enum ManifestValidationCode {
-    MANIFEST_VALIDATED = "MANIFEST_VALIDATED",
-    MANIFEST_INVALID = "MANIFEST_INVALID",
-    ERROR_VALIDATION_FAILED = "ERROR_VALIDATION_FAILED",
-  }
-
-  const enum ExtensionOperationCode {
-    ERROR_EXTENSION_ALREADY_INSTALLED = "ERROR_EXTENSION_ALREADY_INSTALLED",
-    EXTENSION_INSTALL_SUCCESSFUL = "EXTENSION_INSTALL_SUCCESSFUL",
-    ERROR_EXTENSION_INSTALL_FAILED = "ERROR_EXTENSION_INSTALL_FAILED",
-
-    ERROR_EXTENSION_NOT_FOUND = "ERROR_EXTENSION_NOT_FOUND",
-    EXTENSION_UNINSTALL_SUCCESSFUL = "EXTENSION_UNINSTALL_SUCCESSFUL",
-    ERROR_EXTENSION_UNINSTALL_FAILED = " ERROR_EXTENSION_UNINSTALL_FAILED",
-
-    EXTENSION_ENABLE_SUCCESSFUL = "EXTENSION_ENABLE_SUCCESSFUL",
-    EXTENSIONS_RETRIEVED = "EXTENSIONS_RETRIEVED",
-    ERROR_EXTENSION_DISABLED = "ERROR_EXTENSION_DISABLED",
-
-    ERROR_ENTRY_FILE_NOT_FOUND = "ERROR_ENTRY_FILE_NOT_FOUND",
-    EXTENSION_LOAD_SUCCESSFUL = "EXTENSION_LOAD_SUCCESSFUL",
-    ERROR_EXTENSION_LOAD_FAILED = "ERROR_EXTENSION_LOAD_FAILED",
-
-    EXTENSION_ALREADY_LOADED = "EXTENSION_ALREADY_LOADED",
-
-    EXTENSION_COPY_FAILED = "EXTENSION_COPY_FAILED",
-
-    ERROR_INVALID_VIEW = "ERROR_INVALID_VIEW",
-  }
-
-  const enum DatabaseCode {
-    DATABASE_ERROR = "DATABASE_ERROR",
-  }
+  /**
+   * Represents the response object returned by `ExtensionService` methods.
+   *
+   * @template T - The type of the data returned in the response.
+   */
+  type ExtensionServiceResponse<T> = {
+    isSuccess: boolean;
+    message: string;
+    error?: BaseError;
+    data?: T;
+  };
 
   interface Extension {
     id: string;
@@ -111,7 +89,7 @@ declare global {
 
       uninstallExtension: (uniqueId: string) => Promise<Result>,
 
-      listExtensions: ()=> Promise<ExtensionManifest[]>,
+      listExtensions: ()=> Promise<ExtensionServiceResponse<ExtensionManifest[]>>,
 
       updateExtension: (uniqueId: string, sourcePath: string)=> Promise<Result<null> | Result<ExtensionManifest> | Result<z.ZodFormattedError<ExtensionManifest, string>>>,
 

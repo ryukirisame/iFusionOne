@@ -16,6 +16,8 @@ type ServiceConstructor<T extends Service, Args extends any[] = []> = new (...ar
  * ServiceRegistry is a static registry class that manages service instances.
  * It allows registering services and getting instances of them.
  *
+ * * The registry supports both serializable and non-serializable arguments using a hybrid key generation approach.
+ *
  * @example
  *
  * // Register a service
@@ -33,13 +35,16 @@ export class ServiceRegistry {
    * A nested map to store service instances.
    * The structure is: serviceName -> argsKey -> instance.
    */
-  private static services = new Map<string, Map<string, any>>();
+  private static services = new Map<string, Map<any, any>>();
 
   /**
    * A map to store service constructors (factories).
    * The structure is: serviceName -> serviceConstructor.
    */
   private static factories = new Map<string, ServiceConstructor<any, any>>();
+
+  private static argsWeakMap = new WeakMap<object, string>();
+  private static argsCounter = 0;
 
   /**
    * Registers a service class in the registry without creating an instance immediately.
@@ -89,6 +94,7 @@ export class ServiceRegistry {
    *
    * @param name - The name of the service to unregister
    * @returns `true` if the service was unregistered, `false` otherwise.
+   *
    * @throws {InvalidArgumentError} If the service name is invalid.
    * @throws {ServiceError} If the service fails to stop.
    *
@@ -156,11 +162,11 @@ export class ServiceRegistry {
       return [];
     }
 
-    // Convert serialized argument keys back into arrays
+    // Return the argument keys as-is.
     try {
-      return Array.from(instances.keys()).map((argsKey) => JSON.parse(argsKey));
+      return Array.from(instances.keys());
     } catch (error) {
-      console.error(`Failed to parse instance arguments for service '${name}':`, error);
+      console.error(`Failed to retrieve instances for service '${name}':`, error);
       throw new UnexpectedError(
         `Failed to retrieve instances for service '${name}'.`,
         error as Error
@@ -188,6 +194,7 @@ export class ServiceRegistry {
    * @param name - The name of the service to start.
    * @param args - Arguments to pass to the service constructor.
    * @returns The service instance.
+   *
    * @throws {InvalidArgumentError} If the service name is invalid.
    * @throws {ServiceError} If the service is not registered.
    * @throws {UnexpectedError} If the service fails to start.
@@ -205,7 +212,8 @@ export class ServiceRegistry {
     }
 
     // First check if the service is already running. If so, return the instance.
-    const argsKey = JSON.stringify(args); // The default key will be "[]", if args to the constructor is empty.
+    // const argsKey = JSON.stringify(args); // The default key will be "[]", if args to the constructor is empty.
+    const argsKey = this.getHybridArgsKey(args); 
     if (this.services.has(name) && this.services.get(name)!.has(argsKey)) {
       console.warn(`Service ${name} is already running.`);
       return this.services.get(name)!.get(argsKey);
@@ -223,7 +231,7 @@ export class ServiceRegistry {
       instance = new factory(...args);
     } catch (error) {
       throw new UnexpectedError(
-        `Failed to instantiate service '${name}' with arguments: ${JSON.stringify(args)}.`,
+        `Failed to instantiate service '${name}' with arguments: ${args}.`,
         error as Error
       );
     }
@@ -256,6 +264,7 @@ export class ServiceRegistry {
    * @param name - Name of the service.
    * @param args - Arguments to pass to the service constructor.
    * @returns The service instance.
+   *
    * @throws {InvalidArgumentError} If the service name is invalid.
    * @throws {ServiceError} If the service is not registered.
    */
@@ -271,7 +280,8 @@ export class ServiceRegistry {
     }
 
     // First check if the service is already running
-    const argsKey = JSON.stringify(args); // The default key will be "[]", if args is empty
+    // const argsKey = JSON.stringify(args); // The default key will be "[]", if args is empty
+    const argsKey = this.getHybridArgsKey(args); 
     if (this.services.has(name) && this.services.get(name)!.has(argsKey)) {
       console.log(`Service '${name}' is already running.`);
       return this.services.get(name)!.get(argsKey);
@@ -291,6 +301,7 @@ export class ServiceRegistry {
    * @param name - The name of the service to check.
    * @param args - Arguments to uniquely identify the service instance (optional).
    * @returns `true` if the service is running, `false` otherwise.
+   *
    * @throws {InvalidArgumentError} If the service name is invalid.
    */
   static isServiceRunning(name: string, ...args: any[]): boolean {
@@ -314,7 +325,7 @@ export class ServiceRegistry {
     }
 
     // Convert arguments to a string key and check if the instance exists
-    const argsKey = JSON.stringify(args);
+    const argsKey = this.getHybridArgsKey(args);
     return instances.has(argsKey);
   }
 
@@ -381,6 +392,7 @@ export class ServiceRegistry {
    *
    * @param name - The name of the service to stop.
    * An object containing the number of successfully stopped instances and the arguments of instances that failed to stop.
+   * @returns An object containing the number of successfully stopped instances and the arguments of instances that failed to stop.
    *
    * @throws {InvalidArgumentError} If the service name is invalid.
    * @throws {ServiceError} If the service is not registered.
@@ -468,6 +480,41 @@ export class ServiceRegistry {
     );
 
     return { stopped: stoppedCount, failed: failedServices };
+  }
+
+  /**
+   * Generates a unique key for the given arguments using a hybrid approach.
+   *
+   * - Uses `WeakMap` for non-serializable objects.
+   * - Uses `JSON.stringify` for serializable arguments.
+   * - Falls back to `String(arg)` for edge cases.
+   *
+   * @param args - The arguments to generate a key for.
+   * @returns A unique string key for the arguments.
+   *
+   * @example
+   * const key = ServiceRegistry.getHybridArgsKey(["App", browserWindow]);
+   * console.log(key); // "App|weakKey-1"
+   */
+  private static getHybridArgsKey(args: any[]): string {
+    return args
+      .map((arg) => {
+        if (typeof arg === "object" && arg !== null) {
+          // Use WeakMap for non-serializable objects
+          if (!this.argsWeakMap.has(arg)) {
+            this.argsWeakMap.set(arg, `weakKey-${this.argsCounter++}`);
+          }
+          return this.argsWeakMap.get(arg);
+        }
+        try {
+          // Use JSON.stringify for serializable arguments
+          return JSON.stringify(arg);
+        } catch {
+          // Fallback to String(arg) for edge cases
+          return String(arg);
+        }
+      })
+      .join("|");
   }
 
   /**

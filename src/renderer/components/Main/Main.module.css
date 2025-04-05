@@ -2,8 +2,8 @@
 .main-container{
     background-color: rgb(95, 180, 255);
     padding: 24px;
-   
-    
+    height: max-content;
+    overflow: auto;
 }
 
 .extension-card{

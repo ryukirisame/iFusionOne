@@ -14,7 +14,6 @@ export default class BaseError extends Error {
    * @param {Error} [cause] - The underlying cause of this error (optional).
    */
   constructor(message: string, cause?: Error) {
-
     super(message);
     this.name = this.constructor.name; // Set the error name to the class name
     this.cause = cause;
@@ -26,7 +25,7 @@ export default class BaseError extends Error {
   }
 
   /**
-   * Returns a concise error message for this error.
+   * Returns the message for this error.
    * @returns {string} A string containing the error name and message.
    * @example
    * const error = new BaseError("Something went wrong");
@@ -50,17 +49,17 @@ export default class BaseError extends Error {
     let result = this.getMessage();
     const visited = new Set<Error>();
     let currentCause: Error | undefined = this.cause;
-  
+
     while (currentCause && !visited.has(currentCause)) {
       visited.add(currentCause);
       result += `\n -> ${currentCause.name}: ${currentCause.message}`;
       currentCause = currentCause instanceof BaseError ? currentCause.cause : undefined;
     }
-  
+
     if (currentCause) {
       result += "\n -> Circular reference detected in error cause chain.";
     }
-  
+
     return result;
   }
 
@@ -86,7 +85,7 @@ export default class BaseError extends Error {
    * console.log(error.getCauseChainArray());
    * // ["BaseError: Higher-level error", "BaseError: Root cause"]
    */
-  getCauseChainArray(): string[] {
+  getCauseMessageChainArray(): string[] {
     const messages: string[] = [];
     const visited = new Set<Error>();
     let current: Error | undefined = this;
@@ -103,10 +102,25 @@ export default class BaseError extends Error {
 
     return messages;
   }
+
+  // getCauseChainErrorArray(): Error[] {
+  //   const errors: Error[] = [];
+  //   const visited = new Set<Error>();
+  //   let current: Error | undefined = this;
+
+  //   while (current && !visited.has(current)) {
+  //     visited.add(current);
+  //     errors.push(current);
+  //     current = current instanceof BaseError ? current.cause : undefined;
+  //   }
+
+  //   if (current) {
+  //     errors.push(new BaseError("Circular reference detected in error cause chain."));
+  //   }
+
+  //   return errors;
+  // }
 }
-
-
-
 
 class DatabaseError extends BaseError {
   constructor(message: string, cause?: Error) {
