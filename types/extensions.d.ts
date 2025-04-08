@@ -1,3 +1,5 @@
+import { BaseError } from "../src/electron/core/errors/index.js";
+
 declare global {
   interface ExtensionManifest {
     // id?: string;
@@ -22,9 +24,16 @@ declare global {
    * @template T - The type of the data returned in the response.
    */
   type ExtensionServiceResponse<T> = {
+    /** Indicates whether the operation was successful. */
     isSuccess: boolean;
+
+    /** A message describing the result of the operation. */
     message: string;
+
+    /** The data returned by the operation, if successful. */
     error?: BaseError;
+
+    /** The error encountered during the operation, if any. */
     data?: T;
   };
 
@@ -36,44 +45,22 @@ declare global {
     icon?: string;
   }
 
-  // Event-Payload mapping for extension management
-  interface EventPayloadMapping {
+  interface CommandPayloadMapping {
     "extension:install": {
       request: null;
       response:
-        | Result<ZodFormattedError<ExtensionManifest, string>>
-        | Result<ExtensionManifest>
-        | Result
-        | undefined;
+        | MainToRendererResponse<{ uniqueId: string; extensionName: string }>
+        | MainToRendererResponse<void>;
     };
 
     "extension:uninstall": {
-      request: string;
-      response: Result;
+      request: { extensionId: string };
+      response: MainToRendererResponse<{ uniqueId: string }>;
     };
 
     "extension:list": {
       request: null;
-      response: ExtensionManifest[];
-    };
-
-    "extension:update": {
-      request: { uniqueId: string; sourcePath: string };
-      response: 
-        | Result<null>
-        | Result<ExtensionManifest>
-        | Result<z.ZodFormattedError<ExtensionManifest, string>>
-      ;
-    };
-
-    "extension:enable": {
-      request: string;
-      response: Result;
-    };
-
-    "extension:disable": {
-      request: string;
-      response: Result;
+      response: MainToRendererResponse<ExtensionManifest[]>;
     };
   }
 
@@ -81,22 +68,15 @@ declare global {
   interface ifusion {
     extensions: {
       installExtension: () => Promise<
-        | Result<ZodFormattedError<ExtensionManifest, string>>
-        | Result<ExtensionManifest>
-        | Result
-        | undefined
-      >,
+        | MainToRendererResponse<{ uniqueId: string; extensionName: string }>
+        | MainToRendererResponse<void>
+      >;
 
-      uninstallExtension: (uniqueId: string) => Promise<Result>,
+      uninstallExtension: (
+        uniqueId: string
+      ) => Promise<MainToRendererResponse<{ uniqueId: string }>>;
 
-      listExtensions: ()=> Promise<ExtensionServiceResponse<ExtensionManifest[]>>,
-
-      updateExtension: (uniqueId: string, sourcePath: string)=> Promise<Result<null> | Result<ExtensionManifest> | Result<z.ZodFormattedError<ExtensionManifest, string>>>,
-
-      enableExtension: (uniqueId: string)=> Promise<Result>,
-
-      disableExtension: (uniqueId: string)=> Promise<Result>,
-
+      listExtensions: () => Promise<MainToRendererResponse<ExtensionManifest[]>>;
     };
   }
 }

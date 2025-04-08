@@ -1,15 +1,13 @@
-import { app, BrowserWindow,  Menu } from "electron";
+import { app, BrowserWindow, Menu } from "electron";
 import path from "path";
 import { ipcMainOn, isDev } from "./utils.js";
 import { getPreloadFilePath } from "./pathResolver.js";
 
-import { initializeTabManager } from "./core/services/TabService/TabManager.js";
-
-import { initializeExtensionManager } from "./core/services/ExtensionService/ExtensionManager.js";
 import setupIPCChannels from "./core/ipc/ipc.js";
 import { ExtensionService } from "./core/services/services.js";
 import { ServiceRegistry } from "./core/registry/ServiceRegistry/ServiceRegistry.js";
 import TabService from "./core/services/TabService/TabService.js";
+import AppInitializer from "./core/AppInitializer.js";
 
 Menu.setApplicationMenu(null);
 
@@ -34,15 +32,8 @@ app.whenReady().then(() => {
 
   ipcMainOn("sendFrameAction", frameActionHandler);
 
-  // Registering ExtensionService to ServiceRegistry
-  ServiceRegistry.registerService("ExtensionService", ExtensionService);
-  ServiceRegistry.registerService("TabService", TabService);
-
-  // Initalizing managers
-  initializeTabManager(mainWindow);
-  initializeExtensionManager(mainWindow);
-
-  setupIPCChannels();
+  AppInitializer.getInstance(mainWindow).initialize();
+  
 });
 
 // async function selectFolderAndReadFile() {

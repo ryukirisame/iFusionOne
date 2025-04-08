@@ -35,7 +35,7 @@ export class ServiceRegistry {
    * A nested map to store service instances.
    * The structure is: serviceName -> argsKey -> instance.
    */
-  private static services = new Map<string, Map<any, any>>();
+  private static services = new Map<string, Map<string, any>>();
 
   /**
    * A map to store service constructors (factories).
@@ -138,41 +138,41 @@ export class ServiceRegistry {
     return true;
   }
 
-  /**
-   * List all instances of a service.
-   *
-   * @param name - Name of the service
-   * @returns An array of argument lists for each instance if the service is running. Returns an empty array if the service is not running.
-   * @throws {InvalidArgumentError} If the service name is invalid.
-   *
-   */
-  static listServiceInstances(name: string): unknown[][] | [] {
-    // Validate the service name
-    try {
-      this.validateServiceName(name);
-    } catch (error) {
-      throw new InvalidArgumentError("Invalid service name", error as Error);
-    }
+  // /**
+  //  * List all instances of a service.
+  //  *
+  //  * @param name - Name of the service
+  //  * @returns An array of argument lists for each instance if the service is running. Returns an empty array if the service is not running.
+  //  * @throws {InvalidArgumentError} If the service name is invalid.
+  //  *
+  //  */
+  // static listServiceInstances(name: string): unknown[][] | [] {
+  //   // Validate the service name
+  //   try {
+  //     this.validateServiceName(name);
+  //   } catch (error) {
+  //     throw new InvalidArgumentError("Invalid service name", error as Error);
+  //   }
 
-    // Retrieve the instances map for the service
-    const instances = this.services.get(name);
+  //   // Retrieve the instances map for the service
+  //   const instances = this.services.get(name);
 
-    if (!instances) {
-      console.warn(`No running instances found for service '${name}'.`);
-      return [];
-    }
+  //   if (!instances) {
+  //     console.warn(`No running instances found for service '${name}'.`);
+  //     return [];
+  //   }
 
-    // Return the argument keys as-is.
-    try {
-      return Array.from(instances.keys());
-    } catch (error) {
-      console.error(`Failed to retrieve instances for service '${name}':`, error);
-      throw new UnexpectedError(
-        `Failed to retrieve instances for service '${name}'.`,
-        error as Error
-      );
-    }
-  }
+  //   // Return the argument keys as-is.
+  //   try {
+  //     return Array.from(instances.keys());
+  //   } catch (error) {
+  //     console.error(`Failed to retrieve instances for service '${name}':`, error);
+  //     throw new UnexpectedError(
+  //       `Failed to retrieve instances for service '${name}'.`,
+  //       error as Error
+  //     );
+  //   }
+  // }
 
   /**
    * List all running services.

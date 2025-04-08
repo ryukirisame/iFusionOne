@@ -1,19 +1,16 @@
 import { ipcMain } from "electron";
-import { ipcMainHandle } from "../../utils.js";
 import { CommandRegistry } from "../registry/CommandRegistry/CommandRegistry.js";
 
 let channels: string[] = ["extension", "tab", "frame-action"];
 
-export default function setupIPCChannels() {
+export default function setupIPCChannels<T extends keyof CommandPayloadMapping>() {
   for (let channel of channels) {
-
-    ipcMain.handle(channel, async (event, command: string, payload: any) => {
-        event.senderFrame?.url
-      return CommandRegistry.execute(command, payload);
+    ipcMain.handle(channel, async (_, command: T, payload: CommandPayloadMapping[T]["request"]) => {
+      return await CommandRegistry.execute(command, payload);
     });
 
-    ipcMain.on(channel, async (_, command: string, payload: any) => {
-       CommandRegistry.execute(command, payload);
+    ipcMain.on(channel, (_, command: T, payload: CommandPayloadMapping[T]["request"]) => {
+      CommandRegistry.execute(command, payload);
     });
   }
 }

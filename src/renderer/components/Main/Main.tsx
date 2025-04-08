@@ -5,12 +5,12 @@ import { useTabContext } from "../../contexts/TabContext";
 export default function Main() {
   const [extensions, setExtensions] = useState<ExtensionManifest[]>([]);
 
-  const { createNewTab } = useTabContext();
+  const { createNewTab, closeExtensionTab } = useTabContext();
 
   async function fetchExtensions() {
     console.log("fetching extensions...");
     const res = await window.ifusion.extensions.listExtensions();
-    
+
     let extensionsInfo: ExtensionManifest[] = [];
 
     if (res.isSuccess) {
@@ -31,19 +31,10 @@ export default function Main() {
   }
 
   async function uninstallExtension(extensionUniqueId: string) {
+    await closeExtensionTab(extensionUniqueId);
     const res = await window.ifusion.extensions.uninstallExtension(extensionUniqueId);
     console.log(res);
     fetchExtensions();
-  }
-
-  async function enableExtension(extensionUniqueId: string) {
-    const res = await window.ifusion.extensions.enableExtension(extensionUniqueId);
-    console.log(res);
-  }
-
-  async function disableExtension(extensionUniqueId: string) {
-    const res = await window.ifusion.extensions.disableExtension(extensionUniqueId);
-    console.log(res);
   }
 
   function loadExtension(extensionUniqueId: string) {}

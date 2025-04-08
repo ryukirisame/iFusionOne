@@ -5,8 +5,6 @@ import Service from "../Service.js";
 import ExtensionManager from "./ExtensionManager.js";
 import UnexpectedError from "../../errors/UnexpectedError.js";
 
-
-
 /**
  * `ExtensionService` is responsible for managing extensions in the application.
  * It provides methods to install, uninstall, load, and list extensions, as well as handle errors gracefully.
@@ -67,13 +65,15 @@ export default class ExtensionService extends Service {
 
       console.log(`${extensionName} installed successfully.`, response);
     } catch (error) {
-
       let err: BaseError;
 
       if (error instanceof BaseError) {
         err = error;
       } else {
-        err = new UnexpectedError("Unexpected error occurred while loading the extension. Please check logs for more information.", error as Error);
+        err = new UnexpectedError(
+          "Unexpected error occurred while loading the extension. Please check logs for more information.",
+          error as Error
+        );
 
         // Log the unknown error
         console.error(error);
@@ -120,13 +120,15 @@ export default class ExtensionService extends Service {
 
       console.log(`Extension uninstall successful. UniqueId: ${extensionUniqueId}`);
     } catch (error) {
-
       let err: BaseError;
 
       if (error instanceof BaseError) {
         err = error;
       } else {
-        err = new UnexpectedError("Unknown error occurred while loading the extension. Please check logs for more information.", error as Error);
+        err = new UnexpectedError(
+          "Unknown error occurred while loading the extension. Please check logs for more information.",
+          error as Error
+        );
 
         // Log the unknown error
         console.error(error);
@@ -181,7 +183,10 @@ export default class ExtensionService extends Service {
       if (error instanceof BaseError) {
         err = error;
       } else {
-        err = new UnexpectedError("Unknown error occurred while loading the extension. Please check logs for more information.", error as Error);
+        err = new UnexpectedError(
+          "Unknown error occurred while loading the extension. Please check logs for more information.",
+          error as Error
+        );
 
         // Log the unknown error
         console.error(error);
@@ -224,9 +229,7 @@ export default class ExtensionService extends Service {
         data: extensionManifests,
       };
 
-      console.log(
-        `Extensions fetched successful. manifests: ${JSON.stringify(extensionManifests)}`
-      );
+      console.log(`Extensions fetched successful.`);
     } catch (error) {
       // Handle errors
       let err: BaseError;
@@ -234,7 +237,10 @@ export default class ExtensionService extends Service {
       if (error instanceof BaseError) {
         err = error;
       } else {
-        err = new UnexpectedError("Unknown error occurred while loading the extension. Please check logs for more information.", error as Error);
+        err = new UnexpectedError(
+          "Unknown error occurred while loading the extension. Please check logs for more information.",
+          error as Error
+        );
 
         // Log the unknown error
         console.error(error);

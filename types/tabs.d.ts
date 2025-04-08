@@ -1,86 +1,96 @@
+import { BaseError } from "../src/electron/core/errors/index.js";
+
 declare global {
   interface TabUIInfo {
     readonly id: string;
     title: string;
+    readonly extensionUniqueId: string;
   }
 
   interface Tab extends TabUIInfo {
     view: WebContentsView | null;
-    readonly extensionUniqueId: string;
   }
 
-  const enum TabManagerResultCode {
-    TAB_CREATE_SUCCESSFUL = "TAB_CREATE_SUCCESSFUL",
+  /**
+   * Represents the response from a `TabService` method.
+   *
+   * @template T - The type of the data returned in the response.
+   */
+  type TabServiceResponse<T> = {
+    /** Indicates whether the operation was successful. */
+    isSuccess: boolean;
 
-    TAB_CLOSE_SUCCESSFUL = "TAB_CLOSE_SUCCESSFUL",
+    /** A message describing the result of the operation. */
+    message: string;
 
-    TAB_SWITCH_SUCCESSFUL = "TAB_SWITCH_SUCCESSFUL",
-    TAB_SWITCH_FAILED = "TAB_SWITCH_FAILED",
+    /** The data returned by the operation, if successful. */
+    data?: T;
 
-    TAB_REORDER_SUCCESSFUL = "TAB_REORDER_SUCCESSFUL",
+    /** The error encountered during the operation, if any. */
+    error?: BaseError;
+  };
 
-    TAB_GET_ALL_SUCCESSFUL = "TAB_GET_ALL_SUCCESSFUL",
-
-    TAB_GET_ACTIVE_SUCCESSFUL = "TAB_GET_ACTIVE_SUCCESSFUL",
-  }
-
-  // Event-Payload mapping for tab management
-  interface EventPayloadMapping {
+  interface CommandPayloadMapping {
     "tab:create": {
-      request: string;
-      response: Result | Result<TabUIInfo>;
+      request: { extensionId: string };
+      response: MainToRendererResponse<TabUIInfo>;
     };
 
     "tab:close": {
-      request: string;
-      response: Result<{ activeTabIndex: number }>;
+      request: { tabId: string };
+      response: MainToRendererResponse<{ activeTabIndex: number }>;
     };
 
     "tab:switch": {
-      request: string;
-      response: Result<{ activeTabIndex: number }>;
+      request: { tabId: string };
+      response: MainToRendererResponse<{ activeTabIndex: number }>;
     };
 
     "tab:reorder": {
       request: { fromIndex: number; toIndex: number };
-      response: Result<{ tabs: TabUIInfo[]; activeTabIndex: number }>;
+      response: MainToRendererResponse<{ tabs: TabUIInfo[]; activeTabIndex: number }>;
     };
 
-    "tab:getAll": {
+    "tab:hide-all": {
       request: null;
-      response: Result<Tab[]>;
+      response: MainToRendererResponse<void>;
     };
 
-    "tab:getActive": {
-      request: null;
-      response: Result<Tab | null>;
+    "tab:hide": {
+      request: { tabId: string };
+      response: MainToRendererResponse<void>;
     };
 
-    "tab:hideAll": {
-      request: null;
-      response: null;
+    "tab:show": {
+      request: { tabId: string };
+      response: MainToRendererResponse<void>;
+    };
+
+    "tab:close-extension": {
+      request: { extensionId: string };
+      response: MainToRendererResponse<{ activeTabIndex: number }>;
     };
   }
 
   interface ifusion {
     // Exposing tab management APIs to ifusion under tabs object
     tabs: {
-      createNewTab: (extensionUniqueId: string) => Promise<Promise<TabUIInfo>>;
+      createNewTab: (extensionId: string) => Promise<MainToRendererResponse<TabUIInfo>>;
 
-      closeTab: (tabId: string) => Promise<Result<{ activeTabIndex: number }>>;
+      closeTab: (tabId: string) => Promise<MainToRendererResponse<{ activeTabIndex: number }>>;
 
-      switchToTab: (tabId: string) => Promise<Result<{ activeTabIndex: number }>>;
+      switchToTab: (tabId: string) => Promise<MainToRendererResponse<{ activeTabIndex: number }>>;
 
       reorderTab: (
         fromIndex: number,
         toIndex: number
-      ) => Promise<Result<{ tabs: TabUIInfo[]; activeTabIndex: number }>>;
-
-      getAllTabs: () => Promise<Result<Tab[]>>;
-
-      getActiveTab: () => Promise<Result<Tab | null>>;
+      ) => Promise<MainToRendererResponse<{ tabs: TabUIInfo[]; activeTabIndex: number }>>;
 
       hideAllTabs: () => void;
+
+      closeExtensionTab: (
+        extensionId: string
+      ) => Promise<MainToRendererResponse<{ activeTabIndex: number }>>;
     };
   }
 }

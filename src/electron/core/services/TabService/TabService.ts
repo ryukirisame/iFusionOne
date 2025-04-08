@@ -3,24 +3,7 @@ import Service from "../Service.js";
 import TabManager from "./TabManager.js";
 import { BaseError, UnexpectedError } from "../../errors/index.js";
 
-/**
- * Represents the response from a `TabService` method.
- *
- * @template T - The type of the data returned in the response.
- */
-interface TabServiceResponse<T> {
-  /** Indicates whether the operation was successful. */
-  isSuccess: boolean;
 
-  /** A message describing the result of the operation. */
-  message: string;
-
-  /** The data returned by the operation, if successful. */
-  data?: T;
-
-  /** The error encountered during the operation, if any. */
-  error?: Error;
-}
 
 /**
  * `TabService` is a high-level service class that abstracts the complexities of managing tabs in the application.

@@ -2,62 +2,43 @@ import { contextBridge, ipcRenderer } from "electron";
 
 const extensionAPIs = {
   installExtension() {
-   
     return ipcRenderer.invoke("extension", "extension:install");
   },
 
-  uninstallExtension(uniqueId: string) {
-   
-    return ipcRenderer.invoke("extension", "extension:uninstall", uniqueId);
+  uninstallExtension(extensionId: string) {
+    return ipcRenderer.invoke("extension", "extension:uninstall", {extensionId});
   },
 
-  listExtensions()  {
-    return ipcRenderer.invoke("extension","extension:list");
+  listExtensions() {
+    return ipcRenderer.invoke("extension", "extension:list");
   },
-
-  updateExtension(uniqueId: string, sourcePath: string) {
-    return ipcRenderer.invoke("extension","extension:update", { uniqueId, sourcePath });
-  },
-
-  enableExtension(uniqueId: string) {
-    return ipcRenderer.invoke("extension","extension:enable", uniqueId);
-  },
-
-  disableExtension(uniqueId: string) {
-    return ipcRenderer.invoke("extension","extension:disable", uniqueId);
-  },
-};
+} satisfies Window["ifusion"]["extensions"];
 
 const tabAPIs = {
-  createNewTab(extensionUniqueId: string) {
-   
-    return ipcRenderer.invoke("tab","tab:create", extensionUniqueId);
+  async createNewTab(extensionId: string) {
+    return await ipcRenderer.invoke("tab", "tab:create", { extensionId });
   },
 
   closeTab(tabId: string) {
-    return ipcRenderer.invoke("tab","tab:close", tabId);
+    return ipcRenderer.invoke("tab", "tab:close", {tabId});
   },
 
   switchToTab(tabId: string) {
-    return ipcRenderer.invoke("tab","tab:switch", tabId);
+    return ipcRenderer.invoke("tab", "tab:switch", {tabId});
   },
 
   reorderTab(fromIndex: number, toIndex: number) {
-    return ipcRenderer.invoke("tab","tab:reorder", { fromIndex, toIndex });
-  },
-
-  getAllTabs() {
-    return ipcRenderer.invoke("tab","tab:getAll");
-  },
-
-  getActiveTab() {
-    return ipcRenderer.invoke("tab","tab:getActive");
+    return ipcRenderer.invoke("tab", "tab:reorder", { fromIndex, toIndex });
   },
 
   hideAllTabs() {
-    ipcRenderer.send("tab","tab:hideAll");
+    ipcRenderer.send("tab", "tab:hide-all");
   },
-};
+
+  closeExtensionTab(extensionId) {
+    return ipcRenderer.invoke("tab", "tab:close-extension", { extensionId });
+  },
+} satisfies Window["ifusion"]["tabs"];
 
 contextBridge.exposeInMainWorld("ifusion", {
   frameActions: {
@@ -90,5 +71,3 @@ export function ipcRendererInvoke<key extends keyof EventPayloadMapping>(
 ): Promise<EventPayloadMapping[key]["response"]> {
   return ipcRenderer.invoke(channel, payload ? payload : null);
 }
-
-

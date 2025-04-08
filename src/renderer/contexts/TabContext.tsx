@@ -8,6 +8,7 @@ interface TabContextType {
   closeTab: (tabId: string) => Promise<void>;
   reorderTab: (oldIndex: number, newIndex: number) => void;
   hideAllTabs: () => void;
+  closeExtensionTab: (extensionId: string) => Promise<void>;
 }
 
 const TabContext = createContext<TabContextType | undefined>(undefined);
@@ -19,15 +20,15 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   async function createNewTab(extensionUniqueId: string) {
     let response = await window.ifusion.tabs.createNewTab(extensionUniqueId);
-    
+
     console.log(response);
-    if (!response) {
-      console.log("Extension disabled");
+    if (!response.isSuccess) {
+      console.error("Could not create new tab", response.error);
       return;
     }
 
     setActiveTabIndex(tabs.length);
-    setTabs((prevTabs) => [...prevTabs, response]);
+    setTabs((prevTabs) => [...prevTabs, response.data!]);
   }
 
   async function switchToTab(tabId: string) {
@@ -47,6 +48,15 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveTabIndex(response.data!.activeTabIndex);
   }
 
+  async function closeExtensionTab(extensionId: string) {
+    let response = await window.ifusion.tabs.closeExtensionTab(extensionId);
+    setTabs((prevTabs) => {
+      const updatedTabs = prevTabs.filter((tab) => tab.extensionUniqueId !== extensionId);
+      return updatedTabs;
+    });
+    setActiveTabIndex(response.data!.activeTabIndex);
+  }
+
   function reorderTab(oldIndex: number, newIndex: number) {
     setTabs((prevTabs) => {
       const updatedTabs = [...prevTabs];
@@ -55,6 +65,7 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return updatedTabs;
     });
     setActiveTabIndex(newIndex);
+
     window.ifusion.tabs.reorderTab(oldIndex, newIndex);
   }
 
@@ -65,7 +76,7 @@ export const TabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   return (
     <TabContext.Provider
-      value={{ tabs, activeTabIndex, createNewTab, switchToTab, closeTab, reorderTab, hideAllTabs }}
+      value={{ tabs, activeTabIndex, createNewTab, switchToTab, closeTab, reorderTab, hideAllTabs, closeExtensionTab }}
     >
       {children}
     </TabContext.Provider>

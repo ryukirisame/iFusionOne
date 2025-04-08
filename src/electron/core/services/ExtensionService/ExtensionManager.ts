@@ -1,12 +1,12 @@
 import fs from "fs/promises";
 import path from "path";
-import { app, BrowserWindow, WebContentsView } from "electron";
+import { app, BrowserWindow, dialog, WebContentsView } from "electron";
 import { v5 as uuidv5 } from "uuid";
 import sqlite3 from "sqlite3";
 import { open, Database } from "sqlite";
 import { z } from "zod";
-import { ipcMainHandle } from "../../../utils.js";
-import DialogService from "../../../DialogService/DialogService.js";
+
+
 import { CommandRegistry } from "../../registry/CommandRegistry/CommandRegistry.js";
 import {
   SchemaValidationError,
@@ -19,11 +19,15 @@ import {
   UnexpectedError,
   DataParsingError,
   InvalidArgumentError,
+  BaseError,
 } from "../../errors/index.js";
 import { Mutex } from "async-mutex";
 import Service from "../Service.js";
 import ExtensionService from "./ExtensionService.js";
 import { ServiceRegistry } from "../../registry/ServiceRegistry/ServiceRegistry.js";
+import TabService from "../TabService/TabService.js";
+import Main from "electron/main";
+import { error } from "console";
 
 // Define a fixed namespace UUID for deterministic ID generation
 const NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
@@ -515,8 +519,6 @@ class ExtensionManager {
     }
   }
 
-
-  
   // /**
   //  * Updates an existing extension by uninstalling and reinstalling it.
   //  * @param {string} uniqueId - The unique ID of the extension to update.
@@ -549,8 +551,6 @@ class ExtensionManager {
   //     );
   //   }
   // }
-
-  
 
   /**
    * Enables extension.
@@ -777,45 +777,6 @@ class ExtensionManager {
   }
 }
 
-export async function initializeExtensionManager(window: BrowserWindow): Promise<ExtensionService> {
 
-  const extensionService: ExtensionService = await ServiceRegistry.getService("ExtensionService");
-  
-
-  CommandRegistry.register("extension:install", async () => {
-    const path = await DialogService.selectFolder(window);
-    if (!path) {
-      console.log("Folder selection cancelled");
-      return;
-    }
-    try {
-      return await extensionService.installExtension(path);
-    } catch (error) {
-      console.error(error);
-    }
-  });
-
-  CommandRegistry.register("extension:uninstall", async (uniqueId: string) => {
-    return await extensionService.uninstallExtension(uniqueId);
-  });
-
-  CommandRegistry.register("extension:list", async () => {
-    return await extensionService.listExtensions();
-  });
-
-  // CommandRegistry.register("extension:update", async (payload) => {
-  //   return extensionManager.updateExtension(payload.uniqueId, payload.sourcePath);
-  // });
-
-  // CommandRegistry.register("extension:enable", async (payload) => {
-  //   return await extensionManager.enableExtension(payload);
-  // });
-
-  // CommandRegistry.register("extension:disable", async (payload) => {
-  //   return await extensionManager.disableExtension(payload);
-  // });
-
-  return extensionService;
-}
 
 export default ExtensionManager;

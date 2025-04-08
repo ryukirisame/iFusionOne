@@ -122,16 +122,4 @@ export default class BaseError extends Error {
   // }
 }
 
-class DatabaseError extends BaseError {
-  constructor(message: string, cause?: Error) {
-    super(message, cause);
-  }
-}
 
-try {
-  throw new DatabaseError("Could not open database");
-} catch (error) {
-  if (error instanceof DatabaseError) {
-    error;
-  }
-}

@@ -6,6 +6,9 @@ import { ipcMainHandle, ipcMainOn } from "../../../utils.js";
 import { CommandRegistry } from "../../registry/CommandRegistry/CommandRegistry.js";
 import { ServiceRegistry } from "../../registry/ServiceRegistry/ServiceRegistry.js";
 import { BaseError, ExtensionError, InvalidArgumentError, TabError } from "../../errors/index.js";
+import TabService from "./TabService.js";
+import { error } from "console";
+import { isReadable } from "stream";
 
 const headerHeight = 32;
 
@@ -134,6 +137,7 @@ export default class TabManager {
     return {
       id: newTab.id,
       title: newTab.title,
+      extensionUniqueId: manifest.uniqueId!,
     };
   }
 
@@ -204,7 +208,7 @@ export default class TabManager {
   switchToTab(tabId: string): { activeTabIndex: number } {
     // Validate the tabId
     if (!tabId || typeof tabId !== "string") {
-      throw new InvalidArgumentError("Invalid tabId provided.");
+      throw new InvalidArgumentError(`Invalid tabId provided: ${tabId}`);
     }
 
     // If user tries to switch to the same tab, return the current active tab index.
@@ -267,14 +271,13 @@ export default class TabManager {
     return {
       tabs: [
         ...this.tabs.map((tab) => {
-          return { id: tab.id, title: tab.title };
+          return { id: tab.id, title: tab.title, extensionUniqueId: tab.extensionUniqueId };
         }),
       ],
       activeTabIndex: this.getTabIndex(this.getActiveTab()),
     };
   }
 
-  
   /**
    * Closes all tabs associated with a specific extension by its `extensionId`.
    *
@@ -402,36 +405,4 @@ export default class TabManager {
   }
 }
 
-export function initializeTabManager(window: BrowserWindow) {
-  const tabManager: TabManager = TabManager.getInstance(window);
 
-  CommandRegistry.register("tab:create", (payload) => {
-    return tabManager.createNewTab(payload);
-  });
-
-  CommandRegistry.register("tab:close", (payload) => {
-    try {
-      return tabManager.closeTab(payload);
-    } catch (e) {
-      console.error("tab:close failed", e);
-    }
-  });
-
-  CommandRegistry.register("tab:switch", (payload) => {
-    return tabManager.switchToTab(payload);
-  });
-
-  CommandRegistry.register("tab:reorder", (payload) => {
-    try {
-      return tabManager.reorderTab(payload.fromIndex, payload.toIndex);
-    } catch (e) {
-      console.error("tab:reorder failed", e);
-    }
-  });
-
-  CommandRegistry.register("tab:getAll", () => tabManager.getTabs());
-
-  CommandRegistry.register("tab:getActive", () => tabManager.getActiveTab());
-
-  CommandRegistry.register("tab:hideAll", () => tabManager.hideAllTabs());
-}
